@@ -191,6 +191,8 @@ export default function BookingConfirmation() {
   const productName = booking?.productName || booking?.product?.name || booking?.hotel?.name || booking?.ticket?.name || booking?.package?.name || ''
   const totalPrice = booking?.totalPrice || booking?.total || 0
   const status = booking?.status || 'confirmed'
+  const bookingQuantity = booking?.quantity || 1
+  const bookingType = booking?.type || ''
 
   return (
     <div style={styles.page}>
@@ -226,6 +228,12 @@ export default function BookingConfirmation() {
                   : new Date(booking.visitDate || booking.startDate).toLocaleDateString()
                 }
               </div>
+            </div>
+          )}
+          {bookingQuantity > 1 && (bookingType === 'ticket' || bookingType === 'package') && (
+            <div style={styles.detailItem}>
+              <div style={styles.detailLabel}>Quantity</div>
+              <div style={styles.detailValue}>{bookingQuantity} {bookingQuantity === 1 ? 'person' : 'persons'}</div>
             </div>
           )}
           {totalPrice > 0 && (
