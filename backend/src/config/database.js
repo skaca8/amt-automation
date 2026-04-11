@@ -1,26 +1,105 @@
-const Database = require('better-sqlite3');
+const initSqlJs = require('sql.js');
 const path = require('path');
 const fs = require('fs');
 
-let db = null;
+let dbWrapper = null;
+let dbPath = null;
+let inTransaction = false;
 
-function getDb() {
-  if (db) return db;
+function saveDb() {
+  if (dbWrapper && dbPath && !inTransaction) {
+    const data = dbWrapper._db.export();
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(dbPath, buffer);
+  }
+}
 
-  const dataDir = path.join(__dirname, '..', '..', 'data');
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+// Compatibility wrapper: makes sql.js behave like better-sqlite3
+class PreparedStatement {
+  constructor(database, sql) {
+    this._db = database;
+    this._sql = sql;
   }
 
-  const dbPath = path.join(dataDir, 'high1.db');
-  db = new Database(dbPath);
+  run(...params) {
+    this._db.run(this._sql, params.length > 0 ? params : undefined);
+    const result = this._db.exec("SELECT last_insert_rowid() as id");
+    const lastInsertRowid = result.length > 0 ? result[0].values[0][0] : 0;
+    const changes = this._db.getRowsModified();
+    saveDb();
+    return { lastInsertRowid, changes };
+  }
 
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+  get(...params) {
+    let stmt;
+    try {
+      stmt = this._db.prepare(this._sql);
+      if (params.length > 0) stmt.bind(params);
+      if (stmt.step()) {
+        return stmt.getAsObject();
+      }
+      return undefined;
+    } finally {
+      if (stmt) stmt.free();
+    }
+  }
 
-  initTables(db);
+  all(...params) {
+    const results = [];
+    let stmt;
+    try {
+      stmt = this._db.prepare(this._sql);
+      if (params.length > 0) stmt.bind(params);
+      while (stmt.step()) {
+        results.push(stmt.getAsObject());
+      }
+      return results;
+    } finally {
+      if (stmt) stmt.free();
+    }
+  }
+}
 
-  return db;
+class DatabaseWrapper {
+  constructor(sqlJsDb) {
+    this._db = sqlJsDb;
+  }
+
+  prepare(sql) {
+    return new PreparedStatement(this._db, sql);
+  }
+
+  exec(sql) {
+    this._db.exec(sql);
+    saveDb();
+  }
+
+  pragma(str) {
+    try {
+      this._db.exec(`PRAGMA ${str};`);
+    } catch (e) {
+      // Some pragmas may not work in sql.js (e.g. WAL mode)
+    }
+  }
+
+  transaction(fn) {
+    const self = this;
+    return function (...args) {
+      self._db.exec("BEGIN TRANSACTION");
+      inTransaction = true;
+      try {
+        const result = fn(...args);
+        self._db.exec("COMMIT");
+        inTransaction = false;
+        saveDb();
+        return result;
+      } catch (e) {
+        self._db.exec("ROLLBACK");
+        inTransaction = false;
+        throw e;
+      }
+    };
+  }
 }
 
 function initTables(db) {
@@ -191,4 +270,38 @@ function initTables(db) {
   `);
 }
 
-module.exports = { getDb };
+async function initDb() {
+  if (dbWrapper) return dbWrapper;
+
+  const dataDir = path.join(__dirname, '..', '..', 'data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  dbPath = path.join(dataDir, 'high1.db');
+
+  const SQL = await initSqlJs();
+
+  let sqlJsDb;
+  if (fs.existsSync(dbPath)) {
+    const fileBuffer = fs.readFileSync(dbPath);
+    sqlJsDb = new SQL.Database(fileBuffer);
+  } else {
+    sqlJsDb = new SQL.Database();
+  }
+
+  dbWrapper = new DatabaseWrapper(sqlJsDb);
+  dbWrapper.pragma('foreign_keys = ON');
+  initTables(dbWrapper);
+
+  return dbWrapper;
+}
+
+function getDb() {
+  if (!dbWrapper) {
+    throw new Error('Database not initialized. Call initDb() first.');
+  }
+  return dbWrapper;
+}
+
+module.exports = { getDb, initDb };

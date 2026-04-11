@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
-const { getDb } = require('./config/database');
+const { getDb, initDb } = require('./config/database');
 
 function generateBookingNumber() {
   return 'BK-' + uuidv4().replace(/-/g, '').substring(0, 12).toUpperCase();
@@ -495,4 +495,12 @@ function seed() {
   console.log('  - 3 sample bookings (confirmed, pending, cancelled)');
 }
 
-seed();
+async function main() {
+  await initDb();
+  seed();
+}
+
+main().catch(err => {
+  console.error('Seed failed:', err);
+  process.exit(1);
+});
