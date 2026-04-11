@@ -1,0 +1,337 @@
+import React from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+
+const gradients = {
+  hotel: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+  ticket: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+  package: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+}
+
+const icons = {
+  hotel: '\u{1F3E8}',
+  ticket: '\u{1F3BF}',
+  package: '\u{1F381}',
+}
+
+const styles = {
+  card: {
+    background: 'var(--white)',
+    borderRadius: 'var(--radius-md)',
+    overflow: 'hidden',
+    boxShadow: 'var(--shadow-sm)',
+    border: '1px solid var(--border-light)',
+    transition: 'all 0.3s ease',
+    cursor: 'pointer',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  imageArea: {
+    position: 'relative',
+    height: '180px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  imageIcon: {
+    fontSize: '3rem',
+    opacity: 0.9,
+    filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
+  },
+  categoryBadge: {
+    position: 'absolute',
+    top: '12px',
+    left: '12px',
+    padding: '4px 10px',
+    borderRadius: '20px',
+    fontSize: '0.7rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    background: 'rgba(255,255,255,0.9)',
+    color: 'var(--text-primary)',
+    backdropFilter: 'blur(4px)',
+  },
+  featuredBadge: {
+    position: 'absolute',
+    top: '12px',
+    right: '12px',
+    padding: '4px 10px',
+    borderRadius: '20px',
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    background: 'rgba(245, 158, 11, 0.95)',
+    color: '#fff',
+    backdropFilter: 'blur(4px)',
+  },
+  ratingBadge: {
+    position: 'absolute',
+    top: '12px',
+    right: '12px',
+    padding: '4px 10px',
+    borderRadius: '20px',
+    fontSize: '0.75rem',
+    fontWeight: 700,
+    background: 'rgba(255,255,255,0.95)',
+    color: '#f59e0b',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '3px',
+  },
+  body: {
+    padding: '18px',
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  title: {
+    fontSize: '1.05rem',
+    fontWeight: 600,
+    color: 'var(--text-primary)',
+    marginBottom: '6px',
+    lineHeight: 1.3,
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+  },
+  description: {
+    fontSize: '0.85rem',
+    color: 'var(--text-muted)',
+    lineHeight: 1.5,
+    marginBottom: '14px',
+    flex: 1,
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+  },
+  footer: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    marginTop: 'auto',
+  },
+  priceBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  priceLabel: {
+    fontSize: '0.7rem',
+    color: 'var(--text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.3px',
+  },
+  price: {
+    fontSize: '1.2rem',
+    fontWeight: 700,
+    color: 'var(--accent)',
+  },
+  priceCurrency: {
+    fontSize: '0.75rem',
+    fontWeight: 500,
+    marginRight: '2px',
+  },
+  priceUnit: {
+    fontSize: '0.75rem',
+    fontWeight: 400,
+    color: 'var(--text-muted)',
+    marginLeft: '2px',
+  },
+  bookBtn: {
+    padding: '8px 16px',
+    borderRadius: 'var(--radius-sm)',
+    background: 'var(--primary)',
+    color: 'var(--white)',
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    border: 'none',
+    cursor: 'pointer',
+    transition: 'var(--transition)',
+    whiteSpace: 'nowrap',
+  },
+  meta: {
+    display: 'flex',
+    gap: '12px',
+    marginBottom: '10px',
+    flexWrap: 'wrap',
+  },
+  metaItem: {
+    fontSize: '0.75rem',
+    color: 'var(--text-secondary)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+  },
+}
+
+function parseImages(images) {
+  if (!images) return []
+  if (Array.isArray(images)) return images
+  if (typeof images === 'string') {
+    try { return JSON.parse(images) } catch { return [] }
+  }
+  return []
+}
+
+export default function ProductCard({ type = 'hotel', data, onClick }) {
+  const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
+  const lang = i18n.language || 'en'
+
+  const handleClick = () => {
+    if (onClick) {
+      onClick(data)
+    } else {
+      navigate(`/${type}s/${data._id || data.id}`)
+    }
+  }
+
+  const getPrice = () => {
+    if (type === 'hotel') {
+      if (data.roomTypes && data.roomTypes.length > 0) {
+        const minPrice = Math.min(...data.roomTypes.map(r => r.price || r.basePrice || r.base_price || 0))
+        return minPrice
+      }
+      return data.price || data.basePrice || data.base_price || 0
+    }
+    return data.price || data.basePrice || data.base_price || 0
+  }
+
+  const getPriceUnit = () => {
+    if (type === 'hotel') return `/ ${t('common.night')}`
+    if (type === 'ticket') return `/ ${t('common.person')}`
+    return ''
+  }
+
+  const getName = () => {
+    if (lang === 'cn' || lang === 'zh') return data.name_cn || data.name_en || data.name || data.title || 'Untitled'
+    return data.name_en || data.name || data.title || 'Untitled'
+  }
+
+  const getDescription = () => {
+    let desc
+    if (lang === 'cn' || lang === 'zh') {
+      desc = data.description_cn || data.description_en || data.description || data.shortDescription || ''
+    } else {
+      desc = data.description_en || data.description || data.shortDescription || ''
+    }
+    // Strip HTML tags for card preview
+    if (desc && typeof desc === 'string') {
+      const tmp = document.createElement('div')
+      tmp.innerHTML = desc
+      return tmp.textContent || tmp.innerText || ''
+    }
+    return desc
+  }
+
+  const getRating = () => data.rating || data.stars || null
+
+  const getCategory = () => {
+    if (type === 'ticket' && data.category) return data.category
+    if (type === 'package') return t('nav.packages')
+    return null
+  }
+
+  const images = parseImages(data.images)
+  const hasImage = images.length > 0
+  const firstImage = hasImage ? images[0] : null
+
+  const price = getPrice()
+
+  const imageAreaStyle = hasImage
+    ? {
+        ...styles.imageArea,
+        backgroundImage: `url(${firstImage})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      }
+    : { ...styles.imageArea, background: gradients[type] || gradients.hotel }
+
+  // Determine where to show featured vs rating badge (both use top-right)
+  const isFeatured = data.is_featured
+  const rating = type === 'hotel' ? getRating() : null
+
+  return (
+    <div
+      style={styles.card}
+      onClick={handleClick}
+      onMouseEnter={e => {
+        e.currentTarget.style.transform = 'translateY(-6px)'
+        e.currentTarget.style.boxShadow = 'var(--shadow-lg)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.transform = 'translateY(0)'
+        e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
+      }}
+    >
+      <div style={imageAreaStyle}>
+        {!hasImage && <span style={styles.imageIcon}>{icons[type] || icons.hotel}</span>}
+        {getCategory() && (
+          <span style={styles.categoryBadge}>{getCategory()}</span>
+        )}
+        {isFeatured && (
+          <span style={rating ? { ...styles.featuredBadge, top: 'auto', bottom: '12px', right: '12px' } : styles.featuredBadge}>Featured</span>
+        )}
+        {type === 'hotel' && rating && (
+          <span style={styles.ratingBadge}>
+            &#9733; {rating}
+          </span>
+        )}
+      </div>
+
+      <div style={styles.body}>
+        <div style={styles.title}>{getName()}</div>
+        <div style={styles.description}>{getDescription()}</div>
+
+        {type === 'hotel' && data.address && (
+          <div style={styles.meta}>
+            <span style={styles.metaItem}>&#128205; {data.address}</span>
+          </div>
+        )}
+
+        {type === 'ticket' && (
+          <div style={styles.meta}>
+            {data.duration && (
+              <span style={styles.metaItem}>&#9200; {data.duration}</span>
+            )}
+            {data.location && (
+              <span style={styles.metaItem}>&#128205; {data.location}</span>
+            )}
+          </div>
+        )}
+
+        {type === 'package' && data.duration && (
+          <div style={styles.meta}>
+            <span style={styles.metaItem}>&#128197; {data.duration}</span>
+          </div>
+        )}
+
+        <div style={styles.footer}>
+          <div style={styles.priceBlock}>
+            <span style={styles.priceLabel}>{type === 'hotel' ? t('common.from') : t('common.price')}</span>
+            <span style={styles.price}>
+              <span style={styles.priceCurrency}>{t('common.currency')}</span>
+              {price ? price.toLocaleString() : '---'}
+              <span style={styles.priceUnit}>{getPriceUnit()}</span>
+            </span>
+          </div>
+          <button
+            style={styles.bookBtn}
+            onClick={e => {
+              e.stopPropagation()
+              handleClick()
+            }}
+            onMouseEnter={e => { e.target.style.background = 'var(--primary-dark)' }}
+            onMouseLeave={e => { e.target.style.background = 'var(--primary)' }}
+          >
+            {type === 'hotel' ? t('hotel.selectRoom') : t('hotel.bookNow')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
