@@ -15,7 +15,7 @@ const styles = {
     justifyContent: 'center',
     padding: '120px 20px 80px',
     background: 'linear-gradient(135deg, #0d47a1 0%, #1a73e8 40%, #4a90e2 70%, #64b5f6 100%)',
-    overflow: 'hidden',
+    overflow: 'visible',
   },
   heroOverlay: {
     position: 'absolute',

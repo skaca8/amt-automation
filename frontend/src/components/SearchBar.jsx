@@ -8,9 +8,11 @@ const styles = {
     background: 'var(--white)',
     borderRadius: 'var(--radius-lg)',
     boxShadow: 'var(--shadow-lg)',
-    overflow: 'hidden',
+    overflow: 'visible',
     maxWidth: '900px',
     margin: '0 auto',
+    position: 'relative',
+    zIndex: 10,
   },
   tabs: {
     display: 'flex',
