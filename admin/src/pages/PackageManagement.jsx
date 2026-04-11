@@ -65,7 +65,7 @@ export default function PackageManagement() {
         const hid = hotel._id || hotel.id
         try {
           const roomRes = await get(`/admin/products/room-types?hotel_id=${hid}`)
-          roomMap[hid] = roomRes.rooms || roomRes.data || roomRes || []
+          roomMap[hid] = roomRes.room_types || roomRes.rooms || roomRes.data || []
         } catch {
           roomMap[hid] = []
         }

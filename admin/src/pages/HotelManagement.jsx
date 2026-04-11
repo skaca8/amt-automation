@@ -63,7 +63,7 @@ export default function HotelManagement() {
     setLoadingRooms(true)
     try {
       const res = await get(`/admin/products/room-types?hotel_id=${hotelId}`)
-      setRoomTypes(res.rooms || res.data || res || [])
+      setRoomTypes(res.room_types || res.rooms || res.data || [])
     } catch {
       setRoomTypes([])
     } finally {
