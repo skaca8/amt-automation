@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import DateRangePicker from './DateRangePicker'
 
 const styles = {
   wrapper: {
@@ -173,37 +174,13 @@ export default function SearchBar() {
       <form style={styles.form} onSubmit={handleSearch}>
         {activeTab === 'hotels' && (
           <div style={styles.row} className="search-row">
-            <div style={styles.field}>
-              <label style={styles.label}>{t('hotel.checkIn')}</label>
-              <input
-                type="date"
-                lang="en"
-                style={styles.input}
-                value={hotelSearch.checkIn}
-                min={new Date().toISOString().split('T')[0]}
-                onChange={e => {
-                  const val = e.target.value
-                  setHotelSearch(s => ({
-                    ...s,
-                    checkIn: val,
-                    checkOut: s.checkOut && s.checkOut <= val ? '' : s.checkOut
-                  }))
-                }}
-                onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
-                onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
-              />
-            </div>
-            <div style={styles.field}>
-              <label style={styles.label}>{t('hotel.checkOut')}</label>
-              <input
-                type="date"
-                lang="en"
-                style={styles.input}
-                value={hotelSearch.checkOut}
-                min={hotelSearch.checkIn || new Date().toISOString().split('T')[0]}
-                onChange={e => setHotelSearch(s => ({ ...s, checkOut: e.target.value }))}
-                onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
-                onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
+            <div style={{ ...styles.field, flex: 2 }}>
+              <label style={styles.label}>CHECK-IN / CHECK-OUT</label>
+              <DateRangePicker
+                checkIn={hotelSearch.checkIn}
+                checkOut={hotelSearch.checkOut}
+                onChange={(ci, co) => setHotelSearch(s => ({ ...s, checkIn: ci, checkOut: co }))}
+                placeholder="Select dates"
               />
             </div>
             <div style={{ ...styles.field, maxWidth: '120px', minWidth: '100px' }}>
