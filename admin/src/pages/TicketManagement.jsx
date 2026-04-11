@@ -2,10 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { get, post, put, del } from '../utils/api'
 import StatusBadge from '../components/StatusBadge'
 import Modal from '../components/Modal'
+import ImageUploader from '../components/ImageUploader'
+import RichTextEditor from '../components/RichTextEditor'
+import BulkInventoryManager from '../components/BulkInventoryManager'
+import PromotionManager from '../components/PromotionManager'
 
 const emptyTicket = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
-  category: '', price: '', status: 'active',
+  category: '', price: '', status: 'active', images: [],
 }
 
 export default function TicketManagement() {
@@ -16,6 +20,7 @@ export default function TicketManagement() {
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({ ...emptyTicket })
   const [saving, setSaving] = useState(false)
+  const [expandedTicket, setExpandedTicket] = useState(null)
   const [showInventoryModal, setShowInventoryModal] = useState(false)
   const [inventoryTicket, setInventoryTicket] = useState(null)
   const [inventoryData, setInventoryData] = useState([])
@@ -54,6 +59,7 @@ export default function TicketManagement() {
       category: ticket.category || '',
       price: ticket.price || '',
       status: ticket.status || 'active',
+      images: ticket.images || [],
     })
     setShowModal(true)
   }
@@ -84,6 +90,10 @@ export default function TicketManagement() {
     } catch (err) {
       alert('Delete failed: ' + err.message)
     }
+  }
+
+  const toggleExpand = (ticketId) => {
+    setExpandedTicket(expandedTicket === ticketId ? null : ticketId)
   }
 
   const openInventory = async (ticket) => {
@@ -150,6 +160,7 @@ export default function TicketManagement() {
         <table>
           <thead>
             <tr>
+              <th style={{ width: 40 }}></th>
               <th>Name</th>
               <th>Category</th>
               <th>Base Price</th>
@@ -160,39 +171,70 @@ export default function TicketManagement() {
           <tbody>
             {tickets.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={6}>
                   <div className="table-empty">
                     <p>No tickets found. Click "Add Ticket" to create one.</p>
                   </div>
                 </td>
               </tr>
             ) : (
-              tickets.map((ticket) => (
-                <tr key={ticket._id || ticket.id}>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{ticket.name_en}</div>
-                    {ticket.name_cn && (
-                      <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{ticket.name_cn}</div>
+              tickets.map((ticket) => {
+                const tid = ticket._id || ticket.id
+                const isExpanded = expandedTicket === tid
+                return (
+                  <React.Fragment key={tid}>
+                    <tr>
+                      <td>
+                        <button
+                          className="btn btn-icon btn-secondary"
+                          style={{ width: 28, height: 28, fontSize: '0.7rem' }}
+                          onClick={() => toggleExpand(tid)}
+                        >
+                          {isExpanded ? '\u25BC' : '\u25B6'}
+                        </button>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{ticket.name_en}</div>
+                        {ticket.name_cn && (
+                          <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{ticket.name_cn}</div>
+                        )}
+                      </td>
+                      <td style={{ textTransform: 'capitalize' }}>{ticket.category || '-'}</td>
+                      <td style={{ fontWeight: 600 }}>{formatCurrency(ticket.price)}</td>
+                      <td><StatusBadge status={ticket.status} /></td>
+                      <td>
+                        <div className="btn-group">
+                          <button className="btn btn-sm btn-secondary" onClick={() => openEdit(ticket)}>
+                            Edit
+                          </button>
+                          <button className="btn btn-sm btn-primary" onClick={() => openInventory(ticket)}>
+                            Inventory
+                          </button>
+                          <button className="btn btn-sm btn-danger" onClick={() => deleteTicket(ticket)}>
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr>
+                        <td colSpan={6} style={{ background: '#f8fafc', padding: '16px 24px' }}>
+                          <div style={{ marginBottom: 24 }}>
+                            <h4 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 12 }}>
+                              Bulk Inventory Management
+                            </h4>
+                            <BulkInventoryManager
+                              productType="ticket"
+                              productId={tid}
+                            />
+                          </div>
+                          <PromotionManager productType="ticket" productId={tid} />
+                        </td>
+                      </tr>
                     )}
-                  </td>
-                  <td style={{ textTransform: 'capitalize' }}>{ticket.category || '-'}</td>
-                  <td style={{ fontWeight: 600 }}>{formatCurrency(ticket.price)}</td>
-                  <td><StatusBadge status={ticket.status} /></td>
-                  <td>
-                    <div className="btn-group">
-                      <button className="btn btn-sm btn-secondary" onClick={() => openEdit(ticket)}>
-                        Edit
-                      </button>
-                      <button className="btn btn-sm btn-primary" onClick={() => openInventory(ticket)}>
-                        Inventory
-                      </button>
-                      <button className="btn btn-sm btn-danger" onClick={() => deleteTicket(ticket)}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+                  </React.Fragment>
+                )
+              })
             )}
           </tbody>
         </table>
@@ -203,7 +245,7 @@ export default function TicketManagement() {
         isOpen={showModal}
         onClose={() => setShowModal(false)}
         title={editing ? 'Edit Ticket' : 'Add Ticket'}
-        size="md"
+        size="lg"
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
@@ -235,20 +277,18 @@ export default function TicketManagement() {
         </div>
         <div className="form-group">
           <label>Description (English)</label>
-          <textarea
-            className="form-control"
-            rows={3}
+          <RichTextEditor
             value={form.description_en}
-            onChange={(e) => setForm({ ...form, description_en: e.target.value })}
+            onChange={(html) => setForm({ ...form, description_en: html })}
+            placeholder="Ticket description in English"
           />
         </div>
         <div className="form-group">
           <label>Description (Chinese)</label>
-          <textarea
-            className="form-control"
-            rows={3}
+          <RichTextEditor
             value={form.description_cn}
-            onChange={(e) => setForm({ ...form, description_cn: e.target.value })}
+            onChange={(html) => setForm({ ...form, description_cn: html })}
+            placeholder="Ticket description in Chinese"
           />
         </div>
         <div className="form-row">
@@ -289,6 +329,13 @@ export default function TicketManagement() {
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
+        </div>
+        <div className="form-group">
+          <label>Images</label>
+          <ImageUploader
+            images={form.images}
+            onChange={(imgs) => setForm({ ...form, images: imgs })}
+          />
         </div>
       </Modal>
 

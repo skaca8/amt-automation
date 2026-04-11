@@ -2,10 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { get, post, put, del } from '../utils/api'
 import StatusBadge from '../components/StatusBadge'
 import Modal from '../components/Modal'
+import ImageUploader from '../components/ImageUploader'
+import RichTextEditor from '../components/RichTextEditor'
+import BulkInventoryManager from '../components/BulkInventoryManager'
+import PromotionManager from '../components/PromotionManager'
 
 const emptyPackage = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
-  price: '', status: 'active', items: [],
+  price: '', status: 'active', items: [], images: [],
 }
 
 export default function PackageManagement() {
@@ -19,6 +23,7 @@ export default function PackageManagement() {
   const [hotels, setHotels] = useState([])
   const [tickets, setTickets] = useState([])
   const [hotelRooms, setHotelRooms] = useState({})
+  const [expandedPkg, setExpandedPkg] = useState(null)
   const [showInventoryModal, setShowInventoryModal] = useState(false)
   const [inventoryPkg, setInventoryPkg] = useState(null)
   const [inventoryData, setInventoryData] = useState([])
@@ -70,7 +75,7 @@ export default function PackageManagement() {
 
   const openAdd = () => {
     setEditing(null)
-    setForm({ ...emptyPackage, items: [] })
+    setForm({ ...emptyPackage, items: [], images: [] })
     setShowModal(true)
   }
 
@@ -84,6 +89,7 @@ export default function PackageManagement() {
       price: pkg.price || '',
       status: pkg.status || 'active',
       items: pkg.items || [],
+      images: pkg.images || [],
     })
     setShowModal(true)
   }
@@ -135,6 +141,10 @@ export default function PackageManagement() {
 
   const removeItem = (index) => {
     setForm({ ...form, items: form.items.filter((_, i) => i !== index) })
+  }
+
+  const toggleExpand = (pkgId) => {
+    setExpandedPkg(expandedPkg === pkgId ? null : pkgId)
   }
 
   const openInventory = async (pkg) => {
@@ -201,6 +211,7 @@ export default function PackageManagement() {
         <table>
           <thead>
             <tr>
+              <th style={{ width: 40 }}></th>
               <th>Name</th>
               <th>Items</th>
               <th>Price</th>
@@ -211,39 +222,70 @@ export default function PackageManagement() {
           <tbody>
             {packages.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={6}>
                   <div className="table-empty">
                     <p>No packages found. Click "Add Package" to create one.</p>
                   </div>
                 </td>
               </tr>
             ) : (
-              packages.map((pkg) => (
-                <tr key={pkg._id || pkg.id}>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{pkg.name_en}</div>
-                    {pkg.name_cn && (
-                      <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{pkg.name_cn}</div>
+              packages.map((pkg) => {
+                const pid = pkg._id || pkg.id
+                const isExpanded = expandedPkg === pid
+                return (
+                  <React.Fragment key={pid}>
+                    <tr>
+                      <td>
+                        <button
+                          className="btn btn-icon btn-secondary"
+                          style={{ width: 28, height: 28, fontSize: '0.7rem' }}
+                          onClick={() => toggleExpand(pid)}
+                        >
+                          {isExpanded ? '\u25BC' : '\u25B6'}
+                        </button>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{pkg.name_en}</div>
+                        {pkg.name_cn && (
+                          <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{pkg.name_cn}</div>
+                        )}
+                      </td>
+                      <td>{pkg.items?.length || 0} items</td>
+                      <td style={{ fontWeight: 600 }}>{formatCurrency(pkg.price)}</td>
+                      <td><StatusBadge status={pkg.status} /></td>
+                      <td>
+                        <div className="btn-group">
+                          <button className="btn btn-sm btn-secondary" onClick={() => openEdit(pkg)}>
+                            Edit
+                          </button>
+                          <button className="btn btn-sm btn-primary" onClick={() => openInventory(pkg)}>
+                            Inventory
+                          </button>
+                          <button className="btn btn-sm btn-danger" onClick={() => deletePackage(pkg)}>
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr>
+                        <td colSpan={6} style={{ background: '#f8fafc', padding: '16px 24px' }}>
+                          <div style={{ marginBottom: 24 }}>
+                            <h4 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 12 }}>
+                              Bulk Inventory Management
+                            </h4>
+                            <BulkInventoryManager
+                              productType="package"
+                              productId={pid}
+                            />
+                          </div>
+                          <PromotionManager productType="package" productId={pid} />
+                        </td>
+                      </tr>
                     )}
-                  </td>
-                  <td>{pkg.items?.length || 0} items</td>
-                  <td style={{ fontWeight: 600 }}>{formatCurrency(pkg.price)}</td>
-                  <td><StatusBadge status={pkg.status} /></td>
-                  <td>
-                    <div className="btn-group">
-                      <button className="btn btn-sm btn-secondary" onClick={() => openEdit(pkg)}>
-                        Edit
-                      </button>
-                      <button className="btn btn-sm btn-primary" onClick={() => openInventory(pkg)}>
-                        Inventory
-                      </button>
-                      <button className="btn btn-sm btn-danger" onClick={() => deletePackage(pkg)}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+                  </React.Fragment>
+                )
+              })
             )}
           </tbody>
         </table>
@@ -286,20 +328,18 @@ export default function PackageManagement() {
         </div>
         <div className="form-group">
           <label>Description (English)</label>
-          <textarea
-            className="form-control"
-            rows={3}
+          <RichTextEditor
             value={form.description_en}
-            onChange={(e) => setForm({ ...form, description_en: e.target.value })}
+            onChange={(html) => setForm({ ...form, description_en: html })}
+            placeholder="Package description in English"
           />
         </div>
         <div className="form-group">
           <label>Description (Chinese)</label>
-          <textarea
-            className="form-control"
-            rows={3}
+          <RichTextEditor
             value={form.description_cn}
-            onChange={(e) => setForm({ ...form, description_cn: e.target.value })}
+            onChange={(html) => setForm({ ...form, description_cn: html })}
+            placeholder="Package description in Chinese"
           />
         </div>
         <div className="form-row">
@@ -324,6 +364,13 @@ export default function PackageManagement() {
               <option value="inactive">Inactive</option>
             </select>
           </div>
+        </div>
+        <div className="form-group">
+          <label>Images</label>
+          <ImageUploader
+            images={form.images}
+            onChange={(imgs) => setForm({ ...form, images: imgs })}
+          />
         </div>
 
         {/* Package Items */}

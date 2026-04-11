@@ -2,15 +2,19 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { get, post, put, del } from '../utils/api'
 import StatusBadge from '../components/StatusBadge'
 import Modal from '../components/Modal'
+import ImageUploader from '../components/ImageUploader'
+import RichTextEditor from '../components/RichTextEditor'
+import BulkInventoryManager from '../components/BulkInventoryManager'
+import PromotionManager from '../components/PromotionManager'
 
 const emptyHotel = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
-  address: '', amenities: '', status: 'active',
+  address: '', amenities: '', status: 'active', images: [],
 }
 
 const emptyRoom = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
-  max_guests: 2, status: 'active',
+  max_guests: 2, status: 'active', images: [],
 }
 
 export default function HotelManagement() {
@@ -27,6 +31,7 @@ export default function HotelManagement() {
   const [showRoomModal, setShowRoomModal] = useState(false)
   const [editingRoom, setEditingRoom] = useState(null)
   const [roomForm, setRoomForm] = useState({ ...emptyRoom })
+  const [expandedRoom, setExpandedRoom] = useState(null)
   const [showInventoryModal, setShowInventoryModal] = useState(false)
   const [inventoryRoom, setInventoryRoom] = useState(null)
   const [inventoryData, setInventoryData] = useState([])
@@ -65,8 +70,10 @@ export default function HotelManagement() {
     if (expandedHotel === hotelId) {
       setExpandedHotel(null)
       setRoomTypes([])
+      setExpandedRoom(null)
     } else {
       setExpandedHotel(hotelId)
+      setExpandedRoom(null)
       loadRoomTypes(hotelId)
     }
   }
@@ -88,6 +95,7 @@ export default function HotelManagement() {
       address: hotel.address || '',
       amenities: Array.isArray(hotel.amenities) ? hotel.amenities.join(', ') : (hotel.amenities || ''),
       status: hotel.status || 'active',
+      images: hotel.images || [],
     })
     setShowHotelModal(true)
   }
@@ -141,6 +149,7 @@ export default function HotelManagement() {
       description_cn: room.description_cn || '',
       max_guests: room.max_guests || room.maxGuests || 2,
       status: room.status || 'active',
+      images: room.images || [],
     })
     setShowRoomModal(true)
   }
@@ -202,6 +211,10 @@ export default function HotelManagement() {
     } catch (err) {
       alert('Failed to add inventory: ' + err.message)
     }
+  }
+
+  const toggleRoomExpand = (roomId) => {
+    setExpandedRoom(expandedRoom === roomId ? null : roomId)
   }
 
   const formatCurrency = (v) => v != null ? '\u20a9' + Number(v).toLocaleString() : '-'
@@ -310,6 +323,7 @@ export default function HotelManagement() {
                             <table style={{ background: '#ffffff', borderRadius: 8 }}>
                               <thead>
                                 <tr>
+                                  <th style={{ width: 32 }}></th>
                                   <th>Name</th>
                                   <th>Max Guests</th>
                                   <th>Status</th>
@@ -317,34 +331,64 @@ export default function HotelManagement() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {roomTypes.map((room) => (
-                                  <tr key={room._id || room.id}>
-                                    <td>
-                                      <div style={{ fontWeight: 500 }}>{room.name_en}</div>
-                                      {room.name_cn && (
-                                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{room.name_cn}</div>
+                                {roomTypes.map((room) => {
+                                  const rid = room._id || room.id
+                                  const isRoomExpanded = expandedRoom === rid
+                                  return (
+                                    <React.Fragment key={rid}>
+                                      <tr>
+                                        <td>
+                                          <button
+                                            className="btn btn-icon btn-secondary"
+                                            style={{ width: 24, height: 24, fontSize: '0.6rem' }}
+                                            onClick={() => toggleRoomExpand(rid)}
+                                          >
+                                            {isRoomExpanded ? '\u25BC' : '\u25B6'}
+                                          </button>
+                                        </td>
+                                        <td>
+                                          <div style={{ fontWeight: 500 }}>{room.name_en}</div>
+                                          {room.name_cn && (
+                                            <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{room.name_cn}</div>
+                                          )}
+                                        </td>
+                                        <td>{room.max_guests || room.maxGuests || '-'}</td>
+                                        <td><StatusBadge status={room.status} /></td>
+                                        <td>
+                                          <div className="btn-group">
+                                            <button className="btn btn-sm btn-secondary" onClick={() => openEditRoom(room)}>
+                                              Edit
+                                            </button>
+                                            <button className="btn btn-sm btn-primary" onClick={() => openInventory(room)}>
+                                              Inventory
+                                            </button>
+                                            <button className="btn btn-sm btn-danger" onClick={() => deleteRoom(room)}>
+                                              Delete
+                                            </button>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                      {isRoomExpanded && (
+                                        <tr>
+                                          <td colSpan={5} style={{ padding: '16px 12px', background: '#f1f5f9' }}>
+                                            <BulkInventoryManager
+                                              productType="room"
+                                              productId={rid}
+                                            />
+                                          </td>
+                                        </tr>
                                       )}
-                                    </td>
-                                    <td>{room.max_guests || room.maxGuests || '-'}</td>
-                                    <td><StatusBadge status={room.status} /></td>
-                                    <td>
-                                      <div className="btn-group">
-                                        <button className="btn btn-sm btn-secondary" onClick={() => openEditRoom(room)}>
-                                          Edit
-                                        </button>
-                                        <button className="btn btn-sm btn-primary" onClick={() => openInventory(room)}>
-                                          Inventory
-                                        </button>
-                                        <button className="btn btn-sm btn-danger" onClick={() => deleteRoom(room)}>
-                                          Delete
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))}
+                                    </React.Fragment>
+                                  )
+                                })}
                               </tbody>
                             </table>
                           )}
+
+                          {/* Promotions for this hotel */}
+                          <div style={{ marginTop: 24 }}>
+                            <PromotionManager productType="hotel" productId={hid} />
+                          </div>
                         </td>
                       </tr>
                     )}
@@ -393,21 +437,17 @@ export default function HotelManagement() {
         </div>
         <div className="form-group">
           <label>Description (English)</label>
-          <textarea
-            className="form-control"
-            rows={3}
+          <RichTextEditor
             value={hotelForm.description_en}
-            onChange={(e) => setHotelForm({ ...hotelForm, description_en: e.target.value })}
+            onChange={(html) => setHotelForm({ ...hotelForm, description_en: html })}
             placeholder="Hotel description in English"
           />
         </div>
         <div className="form-group">
           <label>Description (Chinese)</label>
-          <textarea
-            className="form-control"
-            rows={3}
+          <RichTextEditor
             value={hotelForm.description_cn}
-            onChange={(e) => setHotelForm({ ...hotelForm, description_cn: e.target.value })}
+            onChange={(html) => setHotelForm({ ...hotelForm, description_cn: html })}
             placeholder="Hotel description in Chinese"
           />
         </div>
@@ -442,6 +482,13 @@ export default function HotelManagement() {
             placeholder="WiFi, Pool, Spa, Restaurant, Parking"
           />
         </div>
+        <div className="form-group">
+          <label>Images</label>
+          <ImageUploader
+            images={hotelForm.images}
+            onChange={(imgs) => setHotelForm({ ...hotelForm, images: imgs })}
+          />
+        </div>
       </Modal>
 
       {/* Room Type Modal */}
@@ -449,7 +496,7 @@ export default function HotelManagement() {
         isOpen={showRoomModal}
         onClose={() => setShowRoomModal(false)}
         title={editingRoom ? 'Edit Room Type' : 'Add Room Type'}
-        size="md"
+        size="lg"
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setShowRoomModal(false)}>Cancel</button>
@@ -481,20 +528,18 @@ export default function HotelManagement() {
         </div>
         <div className="form-group">
           <label>Description (English)</label>
-          <textarea
-            className="form-control"
-            rows={2}
+          <RichTextEditor
             value={roomForm.description_en}
-            onChange={(e) => setRoomForm({ ...roomForm, description_en: e.target.value })}
+            onChange={(html) => setRoomForm({ ...roomForm, description_en: html })}
+            placeholder="Room description in English"
           />
         </div>
         <div className="form-group">
           <label>Description (Chinese)</label>
-          <textarea
-            className="form-control"
-            rows={2}
+          <RichTextEditor
             value={roomForm.description_cn}
-            onChange={(e) => setRoomForm({ ...roomForm, description_cn: e.target.value })}
+            onChange={(html) => setRoomForm({ ...roomForm, description_cn: html })}
+            placeholder="Room description in Chinese"
           />
         </div>
         <div className="form-row">
@@ -519,6 +564,13 @@ export default function HotelManagement() {
               <option value="inactive">Inactive</option>
             </select>
           </div>
+        </div>
+        <div className="form-group">
+          <label>Images</label>
+          <ImageUploader
+            images={roomForm.images}
+            onChange={(imgs) => setRoomForm({ ...roomForm, images: imgs })}
+          />
         </div>
       </Modal>
 
