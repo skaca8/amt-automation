@@ -30,13 +30,13 @@ export default function PaymentManagement() {
       params.set('limit', 20)
       if (filters.status) params.set('status', filters.status)
       if (filters.method) params.set('method', filters.method)
-      if (filters.startDate) params.set('startDate', filters.startDate)
-      if (filters.endDate) params.set('endDate', filters.endDate)
+      if (filters.startDate) params.set('start_date', filters.startDate)
+      if (filters.endDate) params.set('end_date', filters.endDate)
 
       const res = await get(`/admin/payments?${params.toString()}`)
-      setPayments(res.data || res.payments || [])
-      setTotalPages(res.totalPages || res.pagination?.totalPages || 1)
-      setTotalItems(res.total || res.pagination?.total || 0)
+      setPayments(res.payments || res.data || [])
+      setTotalPages(res.pagination?.total_pages || res.totalPages || 1)
+      setTotalItems(res.pagination?.total || res.total || 0)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -73,25 +73,25 @@ export default function PaymentManagement() {
 
   const columns = [
     {
-      key: 'bookingNumber',
+      key: 'booking_number',
       label: 'Booking #',
       render: (val, row) => (
         <span style={{ fontWeight: 600, color: '#3b82f6' }}>
-          {val || row.booking_number || row.booking?.bookingNumber || '-'}
+          {val || row.bookingNumber || '-'}
         </span>
       ),
     },
     {
-      key: 'guestName',
+      key: 'guest_name',
       label: 'Customer',
-      render: (val, row) => val || row.guest_name || row.user?.name || row.booking?.guestName || '-',
+      render: (val, row) => val || row.guestName || row.user?.name || '-',
     },
     {
       key: 'amount',
       label: 'Amount',
       render: (val, row) => (
         <span style={{ fontWeight: 600 }}>
-          {formatCurrency(val || row.totalAmount || row.total_amount)}
+          {formatCurrency(val || row.total_amount || row.totalAmount)}
         </span>
       ),
     },
@@ -100,19 +100,19 @@ export default function PaymentManagement() {
       label: 'Method',
       render: (val, row) => (
         <span style={{ textTransform: 'capitalize' }}>
-          {val || row.paymentMethod || row.payment_method || '-'}
+          {val || row.payment_method || row.paymentMethod || '-'}
         </span>
       ),
     },
     {
       key: 'status',
       label: 'Status',
-      render: (val, row) => <StatusBadge status={val || row.paymentStatus || row.payment_status} type="payment" />,
+      render: (val, row) => <StatusBadge status={val || row.payment_status || row.paymentStatus} type="payment" />,
     },
     {
-      key: 'createdAt',
+      key: 'created_at',
       label: 'Date',
-      render: (val, row) => formatDateTime(val || row.created_at || row.paidAt),
+      render: (val, row) => formatDateTime(val || row.createdAt || row.paidAt),
     },
   ]
 
@@ -201,25 +201,25 @@ export default function PaymentManagement() {
             <div className="info-item">
               <span className="label">Booking Number</span>
               <span className="value" style={{ fontWeight: 600, color: '#3b82f6' }}>
-                {selectedPayment.bookingNumber || selectedPayment.booking_number || selectedPayment.booking?.bookingNumber || '-'}
+                {selectedPayment.booking_number || selectedPayment.bookingNumber || '-'}
               </span>
             </div>
             <div className="info-item">
               <span className="label">Customer</span>
               <span className="value">
-                {selectedPayment.guestName || selectedPayment.guest_name || selectedPayment.user?.name || '-'}
+                {selectedPayment.guest_name || selectedPayment.guestName || selectedPayment.user?.name || '-'}
               </span>
             </div>
             <div className="info-item">
               <span className="label">Amount</span>
               <span className="value" style={{ fontSize: '1.2rem', fontWeight: 700, color: '#1e293b' }}>
-                {formatCurrency(selectedPayment.amount || selectedPayment.totalAmount || selectedPayment.total_amount)}
+                {formatCurrency(selectedPayment.amount || selectedPayment.total_amount || selectedPayment.totalAmount)}
               </span>
             </div>
             <div className="info-item">
               <span className="label">Status</span>
               <span className="value">
-                <StatusBadge status={selectedPayment.status || selectedPayment.paymentStatus || selectedPayment.payment_status} type="payment" />
+                <StatusBadge status={selectedPayment.status || selectedPayment.payment_status || selectedPayment.paymentStatus} type="payment" />
               </span>
             </div>
             <div className="info-item">

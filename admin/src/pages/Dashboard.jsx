@@ -31,19 +31,18 @@ export default function Dashboard() {
         get('/admin/dashboard/booking-chart').catch(() => null),
         get('/admin/dashboard/recent-bookings').catch(() => null),
       ])
-      setOverview(ov || {
-        totalBookings: 0,
-        totalRevenue: 0,
-        activeUsers: 0,
-        todayBookings: 0,
-        bookingChange: 0,
-        revenueChange: 0,
-        userChange: 0,
-        todayChange: 0,
+      setOverview({
+        totalBookings: ov?.total_bookings || ov?.totalBookings || 0,
+        totalRevenue: ov?.total_revenue || ov?.totalRevenue || 0,
+        activeUsers: ov?.total_users || ov?.activeUsers || 0,
+        todayBookings: ov?.today?.bookings || ov?.todayBookings || 0,
+        products: ov?.products || {},
+        bookingStatus: ov?.booking_status || ov?.bookingStatus || {},
       })
-      setRevenueChart(rev?.data || rev || [])
-      setBookingChart(bk?.data || bk || [])
-      setRecentBookings(recent?.data || recent || [])
+      setRevenueChart(rev?.data || (Array.isArray(rev) ? rev : []))
+      setBookingChart(bk?.data || (Array.isArray(bk) ? bk : []))
+      const recentData = recent?.bookings || recent?.data || (Array.isArray(recent) ? recent : [])
+      setRecentBookings(recentData)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -240,9 +239,9 @@ export default function Dashboard() {
                   >
                     <td style={{ fontWeight: 600 }}>{b.bookingNumber || b.booking_number || '-'}</td>
                     <td>{b.guestName || b.guest_name || b.user?.name || '-'}</td>
-                    <td>{b.productName || b.product_name || b.product?.name_en || '-'}</td>
-                    <td>{formatDate(b.checkInDate || b.check_in_date || b.date)}</td>
-                    <td style={{ fontWeight: 600 }}>{formatCurrency(b.totalAmount || b.total_amount)}</td>
+                    <td>{b.product_type || b.productType || '-'}</td>
+                    <td>{formatDate(b.check_in || b.visit_date || b.created_at)}</td>
+                    <td style={{ fontWeight: 600 }}>{formatCurrency(b.total_price || b.totalAmount || b.total_amount)}</td>
                     <td><StatusBadge status={b.status} type="booking" /></td>
                     <td><StatusBadge status={b.paymentStatus || b.payment_status} type="payment" /></td>
                   </tr>

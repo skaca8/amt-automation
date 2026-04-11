@@ -30,16 +30,16 @@ export default function BookingManagement() {
       params.set('page', page)
       params.set('limit', 20)
       if (filters.status) params.set('status', filters.status)
-      if (filters.paymentStatus) params.set('paymentStatus', filters.paymentStatus)
-      if (filters.productType) params.set('productType', filters.productType)
-      if (filters.startDate) params.set('startDate', filters.startDate)
-      if (filters.endDate) params.set('endDate', filters.endDate)
+      if (filters.paymentStatus) params.set('payment_status', filters.paymentStatus)
+      if (filters.productType) params.set('product_type', filters.productType)
+      if (filters.startDate) params.set('from_date', filters.startDate)
+      if (filters.endDate) params.set('to_date', filters.endDate)
       if (filters.search) params.set('search', filters.search)
 
       const res = await get(`/admin/bookings?${params.toString()}`)
-      setBookings(res.data || res.bookings || [])
-      setTotalPages(res.totalPages || res.pagination?.totalPages || 1)
-      setTotalItems(res.total || res.pagination?.total || 0)
+      setBookings(res.bookings || res.data || [])
+      setTotalPages(res.pagination?.total_pages || res.pagination?.totalPages || res.totalPages || 1)
+      setTotalItems(res.pagination?.total || res.total || 0)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -60,10 +60,10 @@ export default function BookingManagement() {
     try {
       const params = new URLSearchParams()
       if (filters.status) params.set('status', filters.status)
-      if (filters.paymentStatus) params.set('paymentStatus', filters.paymentStatus)
-      if (filters.productType) params.set('productType', filters.productType)
-      if (filters.startDate) params.set('startDate', filters.startDate)
-      if (filters.endDate) params.set('endDate', filters.endDate)
+      if (filters.paymentStatus) params.set('payment_status', filters.paymentStatus)
+      if (filters.productType) params.set('product_type', filters.productType)
+      if (filters.startDate) params.set('from_date', filters.startDate)
+      if (filters.endDate) params.set('to_date', filters.endDate)
       if (filters.search) params.set('search', filters.search)
       await downloadFile(`/admin/bookings/export?${params.toString()}`, 'bookings.csv')
     } catch (err) {
@@ -85,51 +85,43 @@ export default function BookingManagement() {
 
   const columns = [
     {
-      key: 'bookingNumber',
+      key: 'booking_number',
       label: 'Booking #',
-      render: (val, row) => (
+      render: (val) => (
         <span style={{ fontWeight: 600, color: '#3b82f6' }}>
-          {val || row.booking_number || '-'}
+          {val || '-'}
         </span>
       ),
     },
     {
-      key: 'guestName',
+      key: 'guest_name',
       label: 'Guest Name',
-      render: (val, row) => val || row.guest_name || row.user?.name || '-',
+      render: (val) => val || '-',
     },
     {
-      key: 'productName',
-      label: 'Product',
-      render: (val, row) => val || row.product_name || row.product?.name_en || '-',
-    },
-    {
-      key: 'productType',
+      key: 'product_type',
       label: 'Type',
-      render: (val, row) => {
-        const type = val || row.product_type || '-'
-        return (
-          <span style={{
-            fontSize: '0.8rem',
-            fontWeight: 500,
-            textTransform: 'capitalize',
-          }}>
-            {type}
-          </span>
-        )
-      },
+      render: (val) => (
+        <span style={{
+          fontSize: '0.8rem',
+          fontWeight: 500,
+          textTransform: 'capitalize',
+        }}>
+          {val || '-'}
+        </span>
+      ),
     },
     {
-      key: 'date',
+      key: 'check_in',
       label: 'Date',
-      render: (val, row) => formatDate(val || row.checkInDate || row.check_in_date),
+      render: (val, row) => formatDate(val || row.visit_date || row.created_at),
     },
     {
-      key: 'totalAmount',
+      key: 'total_price',
       label: 'Total',
-      render: (val, row) => (
+      render: (val) => (
         <span style={{ fontWeight: 600 }}>
-          {formatCurrency(val || row.total_amount)}
+          {formatCurrency(val)}
         </span>
       ),
     },
@@ -139,10 +131,10 @@ export default function BookingManagement() {
       render: (val) => <StatusBadge status={val} type="booking" />,
     },
     {
-      key: 'paymentStatus',
+      key: 'payment_status',
       label: 'Payment',
-      render: (val, row) => (
-        <StatusBadge status={val || row.payment_status} type="payment" />
+      render: (val) => (
+        <StatusBadge status={val} type="payment" />
       ),
     },
   ]
