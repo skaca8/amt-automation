@@ -165,14 +165,25 @@ const styles = {
   },
 }
 
+function parseImages(images) {
+  if (!images) return []
+  if (Array.isArray(images)) return images
+  if (typeof images === 'string') {
+    try { return JSON.parse(images) } catch { return [] }
+  }
+  return []
+}
+
 export default function PackageDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const lang = i18n.language || 'en'
   const [pkg, setPkg] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [startDate, setStartDate] = useState('')
+  const [heroIdx, setHeroIdx] = useState(0)
 
   useEffect(() => {
     const fetchPackage = async () => {
@@ -211,8 +222,12 @@ export default function PackageDetail() {
     )
   }
 
-  const price = pkg.price || pkg.basePrice || 0
+  const price = pkg.price || pkg.basePrice || pkg.base_price || 0
   const includes = pkg.includes || pkg.includedItems || []
+  const pkgImages = parseImages(pkg.images)
+  const pkgName = (lang === 'cn' || lang === 'zh') ? (pkg.name_cn || pkg.name_en || pkg.name) : (pkg.name_en || pkg.name)
+  const pkgDesc = (lang === 'cn' || lang === 'zh') ? (pkg.description_cn || pkg.description_en || pkg.description) : (pkg.description_en || pkg.description)
+  const isHtmlDesc = pkgDesc && typeof pkgDesc === 'string' && /<[a-z][\s\S]*>/i.test(pkgDesc)
 
   return (
     <div style={styles.page}>
@@ -227,11 +242,38 @@ export default function PackageDetail() {
 
       <div style={styles.layout} className="package-detail-layout">
         <div>
-          <div style={styles.imageArea}>
-            <span style={styles.imageIcon}>&#127873;</span>
-          </div>
+          {pkgImages.length > 0 ? (
+            <div style={{ marginBottom: '28px' }}>
+              <div style={{
+                ...styles.imageArea,
+                backgroundImage: `url(${pkgImages[heroIdx]})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+              }} />
+              {pkgImages.length > 1 && (
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12 }}>
+                  {pkgImages.map((img, i) => (
+                    <div
+                      key={i}
+                      onClick={() => setHeroIdx(i)}
+                      style={{
+                        width: 64, height: 44, borderRadius: 6, cursor: 'pointer',
+                        border: i === heroIdx ? '2px solid var(--primary)' : '2px solid transparent',
+                        backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center',
+                        opacity: i === heroIdx ? 1 : 0.6, transition: 'all 0.2s ease',
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={styles.imageArea}>
+              <span style={styles.imageIcon}>&#127873;</span>
+            </div>
+          )}
 
-          <h1 style={styles.name}>{pkg.name}</h1>
+          <h1 style={styles.name}>{pkgName}</h1>
 
           <div style={styles.meta}>
             {pkg.duration && (
@@ -239,7 +281,11 @@ export default function PackageDetail() {
             )}
           </div>
 
-          <p style={styles.description}>{pkg.description}</p>
+          {isHtmlDesc ? (
+            <div style={styles.description} dangerouslySetInnerHTML={{ __html: pkgDesc }} />
+          ) : (
+            <p style={styles.description}>{pkgDesc || ''}</p>
+          )}
 
           {includes.length > 0 && (
             <div style={styles.includesSection}>

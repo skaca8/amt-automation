@@ -53,6 +53,20 @@ const styles = {
     color: 'var(--text-primary)',
     backdropFilter: 'blur(4px)',
   },
+  featuredBadge: {
+    position: 'absolute',
+    top: '12px',
+    right: '12px',
+    padding: '4px 10px',
+    borderRadius: '20px',
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    background: 'rgba(245, 158, 11, 0.95)',
+    color: '#fff',
+    backdropFilter: 'blur(4px)',
+  },
   ratingBadge: {
     position: 'absolute',
     top: '12px',
@@ -154,9 +168,19 @@ const styles = {
   },
 }
 
+function parseImages(images) {
+  if (!images) return []
+  if (Array.isArray(images)) return images
+  if (typeof images === 'string') {
+    try { return JSON.parse(images) } catch { return [] }
+  }
+  return []
+}
+
 export default function ProductCard({ type = 'hotel', data, onClick }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
+  const lang = i18n.language || 'en'
 
   const handleClick = () => {
     if (onClick) {
@@ -169,12 +193,12 @@ export default function ProductCard({ type = 'hotel', data, onClick }) {
   const getPrice = () => {
     if (type === 'hotel') {
       if (data.roomTypes && data.roomTypes.length > 0) {
-        const minPrice = Math.min(...data.roomTypes.map(r => r.price || r.basePrice || 0))
+        const minPrice = Math.min(...data.roomTypes.map(r => r.price || r.basePrice || r.base_price || 0))
         return minPrice
       }
-      return data.price || data.basePrice || 0
+      return data.price || data.basePrice || data.base_price || 0
     }
-    return data.price || data.basePrice || 0
+    return data.price || data.basePrice || data.base_price || 0
   }
 
   const getPriceUnit = () => {
@@ -183,10 +207,25 @@ export default function ProductCard({ type = 'hotel', data, onClick }) {
     return ''
   }
 
-  const getName = () => data.name || data.title || 'Untitled'
+  const getName = () => {
+    if (lang === 'cn' || lang === 'zh') return data.name_cn || data.name_en || data.name || data.title || 'Untitled'
+    return data.name_en || data.name || data.title || 'Untitled'
+  }
 
   const getDescription = () => {
-    return data.description || data.shortDescription || ''
+    let desc
+    if (lang === 'cn' || lang === 'zh') {
+      desc = data.description_cn || data.description_en || data.description || data.shortDescription || ''
+    } else {
+      desc = data.description_en || data.description || data.shortDescription || ''
+    }
+    // Strip HTML tags for card preview
+    if (desc && typeof desc === 'string') {
+      const tmp = document.createElement('div')
+      tmp.innerHTML = desc
+      return tmp.textContent || tmp.innerText || ''
+    }
+    return desc
   }
 
   const getRating = () => data.rating || data.stars || null
@@ -197,7 +236,24 @@ export default function ProductCard({ type = 'hotel', data, onClick }) {
     return null
   }
 
+  const images = parseImages(data.images)
+  const hasImage = images.length > 0
+  const firstImage = hasImage ? images[0] : null
+
   const price = getPrice()
+
+  const imageAreaStyle = hasImage
+    ? {
+        ...styles.imageArea,
+        backgroundImage: `url(${firstImage})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      }
+    : { ...styles.imageArea, background: gradients[type] || gradients.hotel }
+
+  // Determine where to show featured vs rating badge (both use top-right)
+  const isFeatured = data.is_featured
+  const rating = type === 'hotel' ? getRating() : null
 
   return (
     <div
@@ -212,14 +268,17 @@ export default function ProductCard({ type = 'hotel', data, onClick }) {
         e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
       }}
     >
-      <div style={{ ...styles.imageArea, background: gradients[type] || gradients.hotel }}>
-        <span style={styles.imageIcon}>{icons[type] || icons.hotel}</span>
+      <div style={imageAreaStyle}>
+        {!hasImage && <span style={styles.imageIcon}>{icons[type] || icons.hotel}</span>}
         {getCategory() && (
           <span style={styles.categoryBadge}>{getCategory()}</span>
         )}
-        {type === 'hotel' && getRating() && (
+        {isFeatured && (
+          <span style={rating ? { ...styles.featuredBadge, top: 'auto', bottom: '12px', right: '12px' } : styles.featuredBadge}>Featured</span>
+        )}
+        {type === 'hotel' && rating && (
           <span style={styles.ratingBadge}>
-            &#9733; {getRating()}
+            &#9733; {rating}
           </span>
         )}
       </div>

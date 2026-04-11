@@ -244,17 +244,29 @@ const styles = {
   },
 }
 
+function parseImages(images) {
+  if (!images) return []
+  if (Array.isArray(images)) return images
+  if (typeof images === 'string') {
+    try { return JSON.parse(images) } catch { return [] }
+  }
+  return []
+}
+
 export default function HotelDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const lang = i18n.language || 'en'
   const [hotel, setHotel] = useState(null)
+  const [roomTypesList, setRoomTypesList] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [checkIn, setCheckIn] = useState('')
   const [checkOut, setCheckOut] = useState('')
   const [availability, setAvailability] = useState(null)
   const [checkingAvail, setCheckingAvail] = useState(false)
+  const [heroIdx, setHeroIdx] = useState(0)
 
   useEffect(() => {
     const fetchHotel = async () => {
@@ -262,6 +274,7 @@ export default function HotelDetail() {
       try {
         const data = await get(`/hotels/${id}`)
         setHotel(data.hotel || data)
+        setRoomTypesList(data.room_types || data.roomTypes || (data.hotel || data).roomTypes || [])
       } catch (err) {
         setError(err.message)
       } finally {
@@ -309,7 +322,11 @@ export default function HotelDetail() {
     )
   }
 
-  const roomTypes = hotel.roomTypes || []
+  const roomTypes = roomTypesList
+  const hotelImages = parseImages(hotel.images)
+  const hotelName = (lang === 'cn' || lang === 'zh') ? (hotel.name_cn || hotel.name_en || hotel.name) : (hotel.name_en || hotel.name)
+  const hotelDesc = (lang === 'cn' || lang === 'zh') ? (hotel.description_cn || hotel.description_en || hotel.description) : (hotel.description_en || hotel.description)
+  const isHtmlDesc = hotelDesc && typeof hotelDesc === 'string' && /<[a-z][\s\S]*>/i.test(hotelDesc)
 
   return (
     <div style={styles.page}>
@@ -322,13 +339,40 @@ export default function HotelDetail() {
         &larr; {t('common.back')}
       </button>
 
-      <div style={styles.heroImage}>
-        <span style={styles.heroIcon}>&#127976;</span>
-      </div>
+      {hotelImages.length > 0 ? (
+        <div style={{ position: 'relative', marginBottom: '32px' }}>
+          <div style={{
+            ...styles.heroImage,
+            backgroundImage: `url(${hotelImages[heroIdx]})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+          }} />
+          {hotelImages.length > 1 && (
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12 }}>
+              {hotelImages.map((img, i) => (
+                <div
+                  key={i}
+                  onClick={() => setHeroIdx(i)}
+                  style={{
+                    width: 64, height: 44, borderRadius: 6, cursor: 'pointer',
+                    border: i === heroIdx ? '2px solid var(--primary)' : '2px solid transparent',
+                    backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center',
+                    opacity: i === heroIdx ? 1 : 0.6, transition: 'all 0.2s ease',
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={styles.heroImage}>
+          <span style={styles.heroIcon}>&#127976;</span>
+        </div>
+      )}
 
       <div style={styles.infoSection} className="hotel-info-grid">
         <div style={styles.mainInfo}>
-          <h1 style={styles.hotelName}>{hotel.name}</h1>
+          <h1 style={styles.hotelName}>{hotelName}</h1>
           <div style={styles.ratingRow}>
             {hotel.rating && (
               <span style={styles.ratingBadge}>&#9733; {hotel.rating}</span>
@@ -337,7 +381,11 @@ export default function HotelDetail() {
               <span style={styles.address}>&#128205; {hotel.address}</span>
             )}
           </div>
-          <p style={styles.description}>{hotel.description}</p>
+          {isHtmlDesc ? (
+            <div style={styles.description} dangerouslySetInnerHTML={{ __html: hotelDesc }} />
+          ) : (
+            <p style={styles.description}>{hotelDesc || ''}</p>
+          )}
 
           {hotel.amenities && hotel.amenities.length > 0 && (
             <>
@@ -405,44 +453,67 @@ export default function HotelDetail() {
                 onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow-md)' }}
                 onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)' }}
               >
-                <div style={styles.roomImage}>&#128716;</div>
-                <div style={styles.roomInfo}>
-                  <div style={styles.roomName}>{room.name || room.type || `Room Type ${idx + 1}`}</div>
-                  <div style={styles.roomDesc}>{room.description || ''}</div>
-                  <div style={styles.roomMeta}>
-                    {room.maxGuests && (
-                      <span style={styles.roomMetaItem}>&#128101; {t('hotel.maxGuests')}: {room.maxGuests}</span>
-                    )}
-                    {room.bedType && (
-                      <span style={styles.roomMetaItem}>&#128716; {t('hotel.bedType')}: {room.bedType}</span>
-                    )}
-                  </div>
-                  {room.amenities && room.amenities.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {room.amenities.map((a, i) => (
-                        <span key={i} style={{ ...styles.amenityTag, fontSize: '0.7rem', padding: '3px 10px' }}>{a}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div style={styles.roomPriceCol}>
-                  <div style={styles.roomPrice}>
-                    {t('common.currency')} {(room.price || room.basePrice || 0).toLocaleString()}
-                  </div>
-                  <div style={styles.roomPriceUnit}>/ {t('common.night')}</div>
-                  <button
-                    style={{
-                      ...styles.bookRoomBtn,
-                      ...(isAvailable ? {} : { opacity: 0.5, cursor: 'not-allowed', background: 'var(--text-muted)' }),
-                    }}
-                    onClick={() => isAvailable && handleBookRoom(room)}
-                    disabled={!isAvailable}
-                    onMouseEnter={e => { if (isAvailable) { e.target.style.background = 'var(--accent-dark)' } }}
-                    onMouseLeave={e => { if (isAvailable) { e.target.style.background = 'var(--accent)' } }}
-                  >
-                    {isAvailable ? t('hotel.bookNow') : t('hotel.noRooms')}
-                  </button>
-                </div>
+                {(() => {
+                  const roomImgs = parseImages(room.images)
+                  const roomName = (lang === 'cn' || lang === 'zh') ? (room.name_cn || room.name_en || room.name || room.type || `Room Type ${idx + 1}`) : (room.name_en || room.name || room.type || `Room Type ${idx + 1}`)
+                  const roomDesc = (lang === 'cn' || lang === 'zh') ? (room.description_cn || room.description_en || room.description || '') : (room.description_en || room.description || '')
+                  const isRoomHtml = roomDesc && typeof roomDesc === 'string' && /<[a-z][\s\S]*>/i.test(roomDesc)
+                  return (
+                    <>
+                      {roomImgs.length > 0 ? (
+                        <div style={{
+                          ...styles.roomImage,
+                          backgroundImage: `url(${roomImgs[0]})`,
+                          backgroundSize: 'cover',
+                          backgroundPosition: 'center',
+                        }} />
+                      ) : (
+                        <div style={styles.roomImage}>&#128716;</div>
+                      )}
+                      <div style={styles.roomInfo}>
+                        <div style={styles.roomName}>{roomName}</div>
+                        {isRoomHtml ? (
+                          <div style={styles.roomDesc} dangerouslySetInnerHTML={{ __html: roomDesc }} />
+                        ) : (
+                          <div style={styles.roomDesc}>{roomDesc}</div>
+                        )}
+                        <div style={styles.roomMeta}>
+                          {(room.maxGuests || room.max_guests) && (
+                            <span style={styles.roomMetaItem}>&#128101; {t('hotel.maxGuests')}: {room.maxGuests || room.max_guests}</span>
+                          )}
+                          {(room.bedType || room.bed_type) && (
+                            <span style={styles.roomMetaItem}>&#128716; {t('hotel.bedType')}: {room.bedType || room.bed_type}</span>
+                          )}
+                        </div>
+                        {room.amenities && room.amenities.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {room.amenities.map((a, i) => (
+                              <span key={i} style={{ ...styles.amenityTag, fontSize: '0.7rem', padding: '3px 10px' }}>{a}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div style={styles.roomPriceCol}>
+                        <div style={styles.roomPrice}>
+                          {t('common.currency')} {(room.price || room.basePrice || room.base_price || 0).toLocaleString()}
+                        </div>
+                        <div style={styles.roomPriceUnit}>/ {t('common.night')}</div>
+                        <button
+                          style={{
+                            ...styles.bookRoomBtn,
+                            ...(isAvailable ? {} : { opacity: 0.5, cursor: 'not-allowed', background: 'var(--text-muted)' }),
+                          }}
+                          onClick={() => isAvailable && handleBookRoom(room)}
+                          disabled={!isAvailable}
+                          onMouseEnter={e => { if (isAvailable) { e.target.style.background = 'var(--accent-dark)' } }}
+                          onMouseLeave={e => { if (isAvailable) { e.target.style.background = 'var(--accent)' } }}
+                        >
+                          {isAvailable ? t('hotel.bookNow') : t('hotel.noRooms')}
+                        </button>
+                      </div>
+                    </>
+                  )
+                })()}
               </div>
             )
           })

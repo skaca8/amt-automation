@@ -10,6 +10,7 @@ import PromotionManager from '../components/PromotionManager'
 const emptyPackage = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
   price: '', status: 'active', items: [], images: [],
+  is_featured: 0, sort_order: 0,
 }
 
 export default function PackageManagement() {
@@ -49,6 +50,28 @@ export default function PackageManagement() {
     loadPackages()
     loadProductOptions()
   }, [loadPackages])
+
+  const toggleFeatured = async (pkg) => {
+    const pid = pkg._id || pkg.id
+    const newVal = pkg.is_featured ? 0 : 1
+    setPackages(prev => prev.map(p => (p._id || p.id) === pid ? { ...p, is_featured: newVal } : p))
+    try {
+      await put('/admin/products/featured', { product_type: 'package', product_id: pid, is_featured: newVal })
+    } catch {
+      setPackages(prev => prev.map(p => (p._id || p.id) === pid ? { ...p, is_featured: pkg.is_featured } : p))
+    }
+  }
+
+  const updateSortOrder = async (pkg, newOrder) => {
+    const pid = pkg._id || pkg.id
+    const val = Number(newOrder) || 0
+    setPackages(prev => prev.map(p => (p._id || p.id) === pid ? { ...p, sort_order: val } : p))
+    try {
+      await put('/admin/products/featured', { product_type: 'package', product_id: pid, sort_order: val })
+    } catch {
+      // revert silently
+    }
+  }
 
   const loadProductOptions = async () => {
     try {
@@ -93,6 +116,8 @@ export default function PackageManagement() {
       status: pkg.status || 'active',
       items: pkg.items || [],
       images: pkg.images || [],
+      is_featured: pkg.is_featured || 0,
+      sort_order: pkg.sort_order || 0,
     })
     setShowModal(true)
   }
@@ -194,13 +219,15 @@ export default function PackageManagement() {
               <th>Items</th>
               <th>Base Price</th>
               <th>Status</th>
+              <th style={{ width: 60 }}>Featured</th>
+              <th style={{ width: 70 }}>Order</th>
               <th style={{ width: 340 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {packages.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={7}>
                   <div className="table-empty">
                     <p>No packages found. Click "Add Package" to create one.</p>
                   </div>
@@ -220,6 +247,23 @@ export default function PackageManagement() {
                     <td>{pkg.items?.length || 0} items</td>
                     <td style={{ fontWeight: 600 }}>{formatCurrency(pkg.price || pkg.base_price)}</td>
                     <td><StatusBadge status={pkg.status} /></td>
+                    <td style={{ textAlign: 'center' }}>
+                      <button
+                        onClick={() => toggleFeatured(pkg)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.3rem', color: pkg.is_featured ? '#f59e0b' : '#cbd5e1' }}
+                        title={pkg.is_featured ? 'Remove from featured' : 'Mark as featured'}
+                      >
+                        {pkg.is_featured ? '\u2605' : '\u2606'}
+                      </button>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <input
+                        type="number"
+                        value={pkg.sort_order || 0}
+                        onChange={(e) => updateSortOrder(pkg, e.target.value)}
+                        style={{ width: 50, padding: '2px 4px', textAlign: 'center', border: '1px solid #e2e8f0', borderRadius: 4, fontSize: '0.85rem' }}
+                      />
+                    </td>
                     <td>
                       <div className="btn-group" style={{ flexWrap: 'wrap', gap: 4 }}>
                         <button className="btn btn-sm btn-secondary" onClick={() => openEdit(pkg)}>
@@ -324,6 +368,28 @@ export default function PackageManagement() {
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>
+          </div>
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={!!form.is_featured}
+                onChange={(e) => setForm({ ...form, is_featured: e.target.checked ? 1 : 0 })}
+              />
+              Featured on Homepage
+            </label>
+          </div>
+          <div className="form-group">
+            <label>Display Order (lower = first)</label>
+            <input
+              type="number"
+              className="form-control"
+              value={form.sort_order}
+              onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) || 0 })}
+              placeholder="0"
+            />
           </div>
         </div>
         <div className="form-group">

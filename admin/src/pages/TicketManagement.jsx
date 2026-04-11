@@ -10,6 +10,7 @@ import PromotionManager from '../components/PromotionManager'
 const emptyTicket = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
   category: '', price: '', status: 'active', images: [],
+  is_featured: 0, sort_order: 0,
 }
 
 export default function TicketManagement() {
@@ -46,6 +47,28 @@ export default function TicketManagement() {
     loadTickets()
   }, [loadTickets])
 
+  const toggleFeatured = async (ticket) => {
+    const tid = ticket._id || ticket.id
+    const newVal = ticket.is_featured ? 0 : 1
+    setTickets(prev => prev.map(t => (t._id || t.id) === tid ? { ...t, is_featured: newVal } : t))
+    try {
+      await put('/admin/products/featured', { product_type: 'ticket', product_id: tid, is_featured: newVal })
+    } catch {
+      setTickets(prev => prev.map(t => (t._id || t.id) === tid ? { ...t, is_featured: ticket.is_featured } : t))
+    }
+  }
+
+  const updateSortOrder = async (ticket, newOrder) => {
+    const tid = ticket._id || ticket.id
+    const val = Number(newOrder) || 0
+    setTickets(prev => prev.map(t => (t._id || t.id) === tid ? { ...t, sort_order: val } : t))
+    try {
+      await put('/admin/products/featured', { product_type: 'ticket', product_id: tid, sort_order: val })
+    } catch {
+      // revert silently
+    }
+  }
+
   const openAdd = () => {
     setEditing(null)
     setForm({ ...emptyTicket })
@@ -63,6 +86,8 @@ export default function TicketManagement() {
       price: ticket.price || ticket.base_price || '',
       status: ticket.status || 'active',
       images: ticket.images || [],
+      is_featured: ticket.is_featured || 0,
+      sort_order: ticket.sort_order || 0,
     })
     setShowModal(true)
   }
@@ -143,13 +168,15 @@ export default function TicketManagement() {
               <th>Category</th>
               <th>Base Price</th>
               <th>Status</th>
+              <th style={{ width: 60 }}>Featured</th>
+              <th style={{ width: 70 }}>Order</th>
               <th style={{ width: 340 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {tickets.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={7}>
                   <div className="table-empty">
                     <p>No tickets found. Click "Add Ticket" to create one.</p>
                   </div>
@@ -169,6 +196,23 @@ export default function TicketManagement() {
                     <td style={{ textTransform: 'capitalize' }}>{ticket.category || '-'}</td>
                     <td style={{ fontWeight: 600 }}>{formatCurrency(ticket.price || ticket.base_price)}</td>
                     <td><StatusBadge status={ticket.status} /></td>
+                    <td style={{ textAlign: 'center' }}>
+                      <button
+                        onClick={() => toggleFeatured(ticket)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.3rem', color: ticket.is_featured ? '#f59e0b' : '#cbd5e1' }}
+                        title={ticket.is_featured ? 'Remove from featured' : 'Mark as featured'}
+                      >
+                        {ticket.is_featured ? '\u2605' : '\u2606'}
+                      </button>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <input
+                        type="number"
+                        value={ticket.sort_order || 0}
+                        onChange={(e) => updateSortOrder(ticket, e.target.value)}
+                        style={{ width: 50, padding: '2px 4px', textAlign: 'center', border: '1px solid #e2e8f0', borderRadius: 4, fontSize: '0.85rem' }}
+                      />
+                    </td>
                     <td>
                       <div className="btn-group" style={{ flexWrap: 'wrap', gap: 4 }}>
                         <button className="btn btn-sm btn-secondary" onClick={() => openEdit(ticket)}>
@@ -290,6 +334,28 @@ export default function TicketManagement() {
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={!!form.is_featured}
+                onChange={(e) => setForm({ ...form, is_featured: e.target.checked ? 1 : 0 })}
+              />
+              Featured on Homepage
+            </label>
+          </div>
+          <div className="form-group">
+            <label>Display Order (lower = first)</label>
+            <input
+              type="number"
+              className="form-control"
+              value={form.sort_order}
+              onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) || 0 })}
+              placeholder="0"
+            />
+          </div>
         </div>
         <div className="form-group">
           <label>Images</label>

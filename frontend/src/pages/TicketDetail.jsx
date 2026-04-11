@@ -192,15 +192,26 @@ const styles = {
   },
 }
 
+function parseImages(images) {
+  if (!images) return []
+  if (Array.isArray(images)) return images
+  if (typeof images === 'string') {
+    try { return JSON.parse(images) } catch { return [] }
+  }
+  return []
+}
+
 export default function TicketDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const lang = i18n.language || 'en'
   const [ticket, setTicket] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [visitDate, setVisitDate] = useState('')
   const [quantity, setQuantity] = useState(1)
+  const [heroIdx, setHeroIdx] = useState(0)
 
   useEffect(() => {
     const fetchTicket = async () => {
@@ -224,8 +235,12 @@ export default function TicketDetail() {
     navigate(`/booking/ticket/${id}?${params.toString()}`)
   }
 
-  const price = ticket?.price || ticket?.basePrice || 0
+  const price = ticket?.price || ticket?.basePrice || ticket?.base_price || 0
   const total = price * quantity
+  const ticketImages = parseImages(ticket?.images)
+  const ticketName = (lang === 'cn' || lang === 'zh') ? (ticket?.name_cn || ticket?.name_en || ticket?.name) : (ticket?.name_en || ticket?.name)
+  const ticketDesc = (lang === 'cn' || lang === 'zh') ? (ticket?.description_cn || ticket?.description_en || ticket?.description) : (ticket?.description_en || ticket?.description)
+  const isHtmlDesc = ticketDesc && typeof ticketDesc === 'string' && /<[a-z][\s\S]*>/i.test(ticketDesc)
 
   if (loading) {
     return <div style={styles.page}><div className="loading-container"><div className="spinner" /><span className="loading-text">{t('common.loading')}</span></div></div>
@@ -256,15 +271,42 @@ export default function TicketDetail() {
 
       <div style={styles.layout} className="ticket-detail-layout">
         <div>
-          <div style={styles.imageArea}>
-            <span style={styles.imageIcon}>&#127903;</span>
-          </div>
+          {ticketImages.length > 0 ? (
+            <div style={{ marginBottom: '28px' }}>
+              <div style={{
+                ...styles.imageArea,
+                backgroundImage: `url(${ticketImages[heroIdx]})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+              }} />
+              {ticketImages.length > 1 && (
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12 }}>
+                  {ticketImages.map((img, i) => (
+                    <div
+                      key={i}
+                      onClick={() => setHeroIdx(i)}
+                      style={{
+                        width: 64, height: 44, borderRadius: 6, cursor: 'pointer',
+                        border: i === heroIdx ? '2px solid var(--primary)' : '2px solid transparent',
+                        backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center',
+                        opacity: i === heroIdx ? 1 : 0.6, transition: 'all 0.2s ease',
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={styles.imageArea}>
+              <span style={styles.imageIcon}>&#127903;</span>
+            </div>
+          )}
 
           {ticket.category && (
             <span style={styles.categoryBadge}>{ticket.category}</span>
           )}
 
-          <h1 style={styles.name}>{ticket.name}</h1>
+          <h1 style={styles.name}>{ticketName}</h1>
 
           <div style={styles.meta}>
             {ticket.duration && (
@@ -275,7 +317,11 @@ export default function TicketDetail() {
             )}
           </div>
 
-          <p style={styles.description}>{ticket.description}</p>
+          {isHtmlDesc ? (
+            <div style={styles.description} dangerouslySetInnerHTML={{ __html: ticketDesc }} />
+          ) : (
+            <p style={styles.description}>{ticketDesc || ''}</p>
+          )}
         </div>
 
         <div style={styles.bookingCard}>

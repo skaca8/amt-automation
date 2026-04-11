@@ -267,13 +267,15 @@ export default function HotelManagement() {
               <th>Address</th>
               <th>Rooms</th>
               <th>Status</th>
+              <th style={{ width: 60 }}>Featured</th>
+              <th style={{ width: 70 }}>Order</th>
               <th style={{ width: 160 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {hotels.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={8}>
                   <div className="table-empty">
                     <p>No hotels found. Click "Add Hotel" to create one.</p>
                   </div>
@@ -304,6 +306,23 @@ export default function HotelManagement() {
                       <td style={{ color: '#64748b', fontSize: '0.85rem' }}>{hotel.address || '-'}</td>
                       <td>{hotel.room_count || hotel.roomCount || hotel.rooms?.length || '-'}</td>
                       <td><StatusBadge status={hotel.status} /></td>
+                      <td style={{ textAlign: 'center' }}>
+                        <button
+                          onClick={() => toggleFeatured(hotel)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.3rem', color: hotel.is_featured ? '#f59e0b' : '#cbd5e1' }}
+                          title={hotel.is_featured ? 'Remove from featured' : 'Mark as featured'}
+                        >
+                          {hotel.is_featured ? '\u2605' : '\u2606'}
+                        </button>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <input
+                          type="number"
+                          value={hotel.sort_order || 0}
+                          onChange={(e) => updateSortOrder(hotel, e.target.value)}
+                          style={{ width: 50, padding: '2px 4px', textAlign: 'center', border: '1px solid #e2e8f0', borderRadius: 4, fontSize: '0.85rem' }}
+                        />
+                      </td>
                       <td>
                         <div className="btn-group">
                           <button className="btn btn-sm btn-secondary" onClick={() => openEditHotel(hotel)}>
@@ -317,7 +336,7 @@ export default function HotelManagement() {
                     </tr>
                     {isExpanded && (
                       <tr>
-                        <td colSpan={6} style={{ background: '#f8fafc', padding: '16px 24px' }}>
+                        <td colSpan={8} style={{ background: '#f8fafc', padding: '16px 24px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                             <h4 style={{ fontSize: '1rem', fontWeight: 600 }}>Room Types</h4>
                             <div style={{ display: 'flex', gap: 8 }}>
@@ -481,6 +500,28 @@ export default function HotelManagement() {
             onChange={(e) => setHotelForm({ ...hotelForm, amenities: e.target.value })}
             placeholder="WiFi, Pool, Spa, Restaurant, Parking"
           />
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={!!hotelForm.is_featured}
+                onChange={(e) => setHotelForm({ ...hotelForm, is_featured: e.target.checked ? 1 : 0 })}
+              />
+              Featured on Homepage
+            </label>
+          </div>
+          <div className="form-group">
+            <label>Display Order (lower = first)</label>
+            <input
+              type="number"
+              className="form-control"
+              value={hotelForm.sort_order}
+              onChange={(e) => setHotelForm({ ...hotelForm, sort_order: Number(e.target.value) || 0 })}
+              placeholder="0"
+            />
+          </div>
         </div>
         <div className="form-group">
           <label>Images</label>
