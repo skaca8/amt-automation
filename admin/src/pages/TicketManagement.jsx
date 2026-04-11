@@ -26,7 +26,7 @@ export default function TicketManagement() {
     setError('')
     try {
       const res = await get('/admin/tickets')
-      setTickets(res.data || res.tickets || res || [])
+      setTickets(res.tickets || res.data || res || [])
     } catch (err) {
       setError(err.message)
     } finally {
@@ -91,7 +91,7 @@ export default function TicketManagement() {
     setShowInventoryModal(true)
     try {
       const res = await get(`/admin/tickets/${ticket._id || ticket.id}/inventory`)
-      setInventoryData(res.data || res.inventory || res || [])
+      setInventoryData(res.inventory || res.data || res || [])
     } catch {
       setInventoryData([])
     }
@@ -110,7 +110,7 @@ export default function TicketManagement() {
       })
       setNewInventory({ date: '', price: '', quantity: '' })
       const res = await get(`/admin/tickets/${inventoryTicket._id || inventoryTicket.id}/inventory`)
-      setInventoryData(res.data || res.inventory || res || [])
+      setInventoryData(res.inventory || res.data || res || [])
     } catch (err) {
       alert('Failed to add inventory: ' + err.message)
     }

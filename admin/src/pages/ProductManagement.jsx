@@ -92,13 +92,13 @@ export default function ProductManagement() {
       const res = await get('/admin/products/stats').catch(() => null)
       if (res) {
         setStats({
-          hotels: res.hotels || res.hotelCount || 0,
-          tickets: res.tickets || res.ticketCount || 0,
-          packages: res.packages || res.packageCount || 0,
-          activeHotels: res.activeHotels || 0,
-          activeTickets: res.activeTickets || 0,
-          activePackages: res.activePackages || 0,
-          totalRooms: res.totalRooms || 0,
+          hotels: res.hotels || res.hotel_count || res.hotelCount || 0,
+          tickets: res.tickets || res.ticket_count || res.ticketCount || 0,
+          packages: res.packages || res.package_count || res.packageCount || 0,
+          activeHotels: res.active_hotels || res.activeHotels || 0,
+          activeTickets: res.active_tickets || res.activeTickets || 0,
+          activePackages: res.active_packages || res.activePackages || 0,
+          totalRooms: res.total_rooms || res.totalRooms || 0,
         })
       }
     } catch {

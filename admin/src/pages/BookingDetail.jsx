@@ -123,7 +123,7 @@ export default function BookingDetail() {
   if (!booking) return null
 
   const canCancel = booking.status !== 'cancelled' && booking.status !== 'completed'
-  const canRefund = (booking.payment_status === 'paid' || booking.paymentStatus === 'paid') &&
+  const canRefund = (booking.payment_status === 'paid') &&
     booking.status !== 'refunded'
 
   return (

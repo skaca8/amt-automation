@@ -25,7 +25,7 @@ export default function UserDetail() {
     try {
       const [userRes, bookingRes] = await Promise.all([
         get(`/admin/users/${id}`),
-        get(`/admin/users/${id}/bookings`).catch(() => ({ data: [] })),
+        get(`/admin/users/${id}/bookings`).catch(() => ({ bookings: [] })),
       ])
       const userData = userRes.user || userRes.data || userRes
       setUser(userData)
@@ -35,7 +35,7 @@ export default function UserDetail() {
         phone: userData.phone || '',
         role: userData.role || 'user',
       })
-      setBookings(bookingRes.data || bookingRes.bookings || bookingRes || [])
+      setBookings(bookingRes.bookings || bookingRes.data || bookingRes || [])
     } catch (err) {
       setError(err.message)
     } finally {
@@ -103,7 +103,7 @@ export default function UserDetail() {
 
   if (!user) return null
 
-  const totalSpent = bookings.reduce((sum, b) => sum + (b.totalAmount || b.total_amount || 0), 0)
+  const totalSpent = bookings.reduce((sum, b) => sum + (b.total_price || b.total_amount || 0), 0)
 
   return (
     <div>
@@ -114,7 +114,7 @@ export default function UserDetail() {
       <div className="page-header">
         <div>
           <h1>{user.name || 'User'}</h1>
-          <p>Member since {formatDate(user.createdAt || user.created_at)}</p>
+          <p>Member since {formatDate(user.created_at || user.createdAt)}</p>
         </div>
       </div>
 
@@ -221,7 +221,7 @@ export default function UserDetail() {
               </div>
               <div className="info-item">
                 <span className="label">Joined</span>
-                <span className="value">{formatDateTime(user.createdAt || user.created_at)}</span>
+                <span className="value">{formatDateTime(user.created_at || user.createdAt)}</span>
               </div>
             </div>
           )}
@@ -242,13 +242,13 @@ export default function UserDetail() {
             <div className="info-item">
               <span className="label">Email Verified</span>
               <span className="value">
-                <StatusBadge status={user.emailVerified || user.email_verified ? 'active' : 'inactive'} />
+                <StatusBadge status={user.email_verified || user.emailVerified ? 'active' : 'inactive'} />
               </span>
             </div>
             <div className="info-item">
               <span className="label">Last Login</span>
               <span className="value">
-                {formatDateTime(user.lastLogin || user.last_login || user.lastLoginAt)}
+                {formatDateTime(user.last_login || user.lastLogin || user.lastLoginAt)}
               </span>
             </div>
             <div className="info-item">
@@ -291,15 +291,15 @@ export default function UserDetail() {
                     onClick={() => navigate(`/bookings/${b._id || b.id}`)}
                   >
                     <td style={{ fontWeight: 600, color: '#3b82f6' }}>
-                      {b.bookingNumber || b.booking_number || '-'}
+                      {b.booking_number || b.bookingNumber || '-'}
                     </td>
-                    <td>{b.productName || b.product_name || b.product?.name_en || '-'}</td>
-                    <td>{formatDate(b.checkInDate || b.check_in_date || b.date)}</td>
+                    <td>{b.product_name || b.productName || b.product?.name_en || '-'}</td>
+                    <td>{formatDate(b.check_in || b.visit_date || b.date)}</td>
                     <td style={{ fontWeight: 600 }}>
-                      {formatCurrency(b.totalAmount || b.total_amount)}
+                      {formatCurrency(b.total_price || b.total_amount)}
                     </td>
                     <td><StatusBadge status={b.status} type="booking" /></td>
-                    <td><StatusBadge status={b.paymentStatus || b.payment_status} type="payment" /></td>
+                    <td><StatusBadge status={b.payment_status || b.paymentStatus} type="payment" /></td>
                   </tr>
                 ))
               )}

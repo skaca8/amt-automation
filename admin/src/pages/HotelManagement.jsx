@@ -10,7 +10,7 @@ const emptyHotel = {
 
 const emptyRoom = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
-  maxGuests: 2, status: 'active',
+  max_guests: 2, status: 'active',
 }
 
 export default function HotelManagement() {
@@ -37,7 +37,7 @@ export default function HotelManagement() {
     setError('')
     try {
       const res = await get('/admin/hotels')
-      setHotels(res.data || res.hotels || res || [])
+      setHotels(res.hotels || res.data || res || [])
     } catch (err) {
       setError(err.message)
     } finally {
@@ -53,7 +53,7 @@ export default function HotelManagement() {
     setLoadingRooms(true)
     try {
       const res = await get(`/admin/hotels/${hotelId}/rooms`)
-      setRoomTypes(res.data || res.rooms || res || [])
+      setRoomTypes(res.rooms || res.data || res || [])
     } catch {
       setRoomTypes([])
     } finally {
@@ -139,7 +139,7 @@ export default function HotelManagement() {
       name_cn: room.name_cn || '',
       description_en: room.description_en || '',
       description_cn: room.description_cn || '',
-      maxGuests: room.maxGuests || room.max_guests || 2,
+      max_guests: room.max_guests || room.maxGuests || 2,
       status: room.status || 'active',
     })
     setShowRoomModal(true)
@@ -148,7 +148,7 @@ export default function HotelManagement() {
   const saveRoom = async () => {
     setSaving(true)
     try {
-      const payload = { ...roomForm, maxGuests: Number(roomForm.maxGuests) }
+      const payload = { ...roomForm, max_guests: Number(roomForm.max_guests) }
       if (editingRoom) {
         await put(`/admin/hotels/${expandedHotel}/rooms/${editingRoom._id || editingRoom.id}`, payload)
       } else {
@@ -179,7 +179,7 @@ export default function HotelManagement() {
     setShowInventoryModal(true)
     try {
       const res = await get(`/admin/hotels/${expandedHotel}/rooms/${room._id || room.id}/inventory`)
-      setInventoryData(res.data || res.inventory || res || [])
+      setInventoryData(res.inventory || res.data || res || [])
     } catch {
       setInventoryData([])
     }
@@ -198,7 +198,7 @@ export default function HotelManagement() {
       })
       setNewInventory({ date: '', price: '', quantity: '' })
       const res = await get(`/admin/hotels/${expandedHotel}/rooms/${inventoryRoom._id || inventoryRoom.id}/inventory`)
-      setInventoryData(res.data || res.inventory || res || [])
+      setInventoryData(res.inventory || res.data || res || [])
     } catch (err) {
       alert('Failed to add inventory: ' + err.message)
     }
@@ -278,7 +278,7 @@ export default function HotelManagement() {
                         )}
                       </td>
                       <td style={{ color: '#64748b', fontSize: '0.85rem' }}>{hotel.address || '-'}</td>
-                      <td>{hotel.roomCount || hotel.room_count || hotel.rooms?.length || '-'}</td>
+                      <td>{hotel.room_count || hotel.roomCount || hotel.rooms?.length || '-'}</td>
                       <td><StatusBadge status={hotel.status} /></td>
                       <td>
                         <div className="btn-group">
@@ -325,7 +325,7 @@ export default function HotelManagement() {
                                         <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{room.name_cn}</div>
                                       )}
                                     </td>
-                                    <td>{room.maxGuests || room.max_guests || '-'}</td>
+                                    <td>{room.max_guests || room.maxGuests || '-'}</td>
                                     <td><StatusBadge status={room.status} /></td>
                                     <td>
                                       <div className="btn-group">
@@ -504,8 +504,8 @@ export default function HotelManagement() {
               type="number"
               className="form-control"
               min={1}
-              value={roomForm.maxGuests}
-              onChange={(e) => setRoomForm({ ...roomForm, maxGuests: e.target.value })}
+              value={roomForm.max_guests}
+              onChange={(e) => setRoomForm({ ...roomForm, max_guests: e.target.value })}
             />
           </div>
           <div className="form-group">

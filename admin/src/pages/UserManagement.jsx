@@ -23,9 +23,9 @@ export default function UserManagement() {
       params.set('limit', 20)
       if (search) params.set('search', search)
       const res = await get(`/admin/users?${params.toString()}`)
-      setUsers(res.data || res.users || [])
-      setTotalPages(res.totalPages || res.pagination?.totalPages || 1)
-      setTotalItems(res.total || res.pagination?.total || 0)
+      setUsers(res.users || res.data || [])
+      setTotalPages(res.pagination?.total_pages || res.totalPages || 1)
+      setTotalItems(res.pagination?.total || res.total || 0)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -86,18 +86,18 @@ export default function UserManagement() {
       ),
     },
     {
-      key: 'bookingCount',
+      key: 'booking_count',
       label: 'Bookings',
       render: (val, row) => (
         <span style={{ fontWeight: 600 }}>
-          {val ?? row.booking_count ?? row.totalBookings ?? '-'}
+          {val ?? row.bookingCount ?? row.totalBookings ?? '-'}
         </span>
       ),
     },
     {
-      key: 'createdAt',
+      key: 'created_at',
       label: 'Joined',
-      render: (val, row) => formatDate(val || row.created_at),
+      render: (val, row) => formatDate(val || row.createdAt),
     },
   ]
 

@@ -29,7 +29,7 @@ export default function PackageManagement() {
     setError('')
     try {
       const res = await get('/admin/packages')
-      setPackages(res.data || res.packages || res || [])
+      setPackages(res.packages || res.data || res || [])
     } catch (err) {
       setError(err.message)
     } finally {
@@ -45,19 +45,19 @@ export default function PackageManagement() {
   const loadProductOptions = async () => {
     try {
       const [h, t] = await Promise.all([
-        get('/admin/hotels').catch(() => ({ data: [] })),
-        get('/admin/tickets').catch(() => ({ data: [] })),
+        get('/admin/hotels').catch(() => ({ hotels: [] })),
+        get('/admin/tickets').catch(() => ({ tickets: [] })),
       ])
-      const hotelList = h.data || h.hotels || h || []
+      const hotelList = h.hotels || h.data || h || []
       setHotels(hotelList)
-      setTickets(t.data || t.tickets || t || [])
+      setTickets(t.tickets || t.data || t || [])
 
       const roomMap = {}
       for (const hotel of hotelList) {
         const hid = hotel._id || hotel.id
         try {
           const roomRes = await get(`/admin/hotels/${hid}/rooms`)
-          roomMap[hid] = roomRes.data || roomRes.rooms || roomRes || []
+          roomMap[hid] = roomRes.rooms || roomRes.data || roomRes || []
         } catch {
           roomMap[hid] = []
         }
@@ -119,7 +119,7 @@ export default function PackageManagement() {
   const addItem = () => {
     setForm({
       ...form,
-      items: [...form.items, { type: 'hotel', productId: '', roomTypeId: '', quantity: 1 }],
+      items: [...form.items, { type: 'hotel', product_id: '', room_type_id: '', quantity: 1 }],
     })
   }
 
@@ -127,8 +127,8 @@ export default function PackageManagement() {
     const updated = [...form.items]
     updated[index] = { ...updated[index], [field]: value }
     if (field === 'type') {
-      updated[index].productId = ''
-      updated[index].roomTypeId = ''
+      updated[index].product_id = ''
+      updated[index].room_type_id = ''
     }
     setForm({ ...form, items: updated })
   }
@@ -142,7 +142,7 @@ export default function PackageManagement() {
     setShowInventoryModal(true)
     try {
       const res = await get(`/admin/packages/${pkg._id || pkg.id}/inventory`)
-      setInventoryData(res.data || res.inventory || res || [])
+      setInventoryData(res.inventory || res.data || res || [])
     } catch {
       setInventoryData([])
     }
@@ -161,7 +161,7 @@ export default function PackageManagement() {
       })
       setNewInventory({ date: '', price: '', quantity: '' })
       const res = await get(`/admin/packages/${inventoryPkg._id || inventoryPkg.id}/inventory`)
-      setInventoryData(res.data || res.inventory || res || [])
+      setInventoryData(res.inventory || res.data || res || [])
     } catch (err) {
       alert('Failed to add inventory: ' + err.message)
     }
@@ -372,8 +372,8 @@ export default function PackageManagement() {
                       <label>Hotel</label>
                       <select
                         className="form-control"
-                        value={item.productId}
-                        onChange={(e) => updateItem(idx, 'productId', e.target.value)}
+                        value={item.product_id}
+                        onChange={(e) => updateItem(idx, 'product_id', e.target.value)}
                       >
                         <option value="">Select hotel</option>
                         {hotels.map((h) => (
@@ -387,11 +387,11 @@ export default function PackageManagement() {
                       <label>Room Type</label>
                       <select
                         className="form-control"
-                        value={item.roomTypeId || ''}
-                        onChange={(e) => updateItem(idx, 'roomTypeId', e.target.value)}
+                        value={item.room_type_id || ''}
+                        onChange={(e) => updateItem(idx, 'room_type_id', e.target.value)}
                       >
                         <option value="">Select room</option>
-                        {(hotelRooms[item.productId] || []).map((r) => (
+                        {(hotelRooms[item.product_id] || []).map((r) => (
                           <option key={r._id || r.id} value={r._id || r.id}>
                             {r.name_en}
                           </option>
@@ -404,8 +404,8 @@ export default function PackageManagement() {
                     <label>Ticket</label>
                     <select
                       className="form-control"
-                      value={item.productId}
-                      onChange={(e) => updateItem(idx, 'productId', e.target.value)}
+                      value={item.product_id}
+                      onChange={(e) => updateItem(idx, 'product_id', e.target.value)}
                     >
                       <option value="">Select ticket</option>
                       {tickets.map((t) => (

@@ -225,13 +225,13 @@ export default function PaymentManagement() {
             <div className="info-item">
               <span className="label">Payment Method</span>
               <span className="value" style={{ textTransform: 'capitalize' }}>
-                {selectedPayment.method || selectedPayment.paymentMethod || selectedPayment.payment_method || '-'}
+                {selectedPayment.method || selectedPayment.payment_method || selectedPayment.paymentMethod || '-'}
               </span>
             </div>
             <div className="info-item">
               <span className="label">Transaction ID</span>
               <span className="value" style={{ fontSize: '0.8rem', fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                {selectedPayment.transactionId || selectedPayment.transaction_id || '-'}
+                {selectedPayment.stripe_payment_id || selectedPayment.transaction_id || selectedPayment.transactionId || '-'}
               </span>
             </div>
             <div className="info-item">
@@ -241,28 +241,28 @@ export default function PaymentManagement() {
             <div className="info-item">
               <span className="label">Date</span>
               <span className="value">
-                {formatDateTime(selectedPayment.createdAt || selectedPayment.created_at || selectedPayment.paidAt)}
+                {formatDateTime(selectedPayment.created_at || selectedPayment.createdAt || selectedPayment.paidAt)}
               </span>
             </div>
-            {selectedPayment.refundedAt && (
+            {(selectedPayment.refunded_at || selectedPayment.refundedAt) && (
               <div className="info-item">
                 <span className="label">Refunded At</span>
-                <span className="value">{formatDateTime(selectedPayment.refundedAt)}</span>
+                <span className="value">{formatDateTime(selectedPayment.refunded_at || selectedPayment.refundedAt)}</span>
               </div>
             )}
-            {selectedPayment.refundReason && (
+            {(selectedPayment.refund_reason || selectedPayment.refundReason) && (
               <div className="info-item" style={{ gridColumn: '1 / -1' }}>
                 <span className="label">Refund Reason</span>
-                <span className="value">{selectedPayment.refundReason}</span>
+                <span className="value">{selectedPayment.refund_reason || selectedPayment.refundReason}</span>
               </div>
             )}
-            {selectedPayment.gatewayResponse && (
+            {(selectedPayment.gateway_response || selectedPayment.gatewayResponse) && (
               <div className="info-item" style={{ gridColumn: '1 / -1' }}>
                 <span className="label">Gateway Response</span>
                 <span className="value" style={{ fontSize: '0.8rem', fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                  {typeof selectedPayment.gatewayResponse === 'object'
-                    ? JSON.stringify(selectedPayment.gatewayResponse, null, 2)
-                    : selectedPayment.gatewayResponse}
+                  {typeof (selectedPayment.gateway_response || selectedPayment.gatewayResponse) === 'object'
+                    ? JSON.stringify(selectedPayment.gateway_response || selectedPayment.gatewayResponse, null, 2)
+                    : (selectedPayment.gateway_response || selectedPayment.gatewayResponse)}
                 </span>
               </div>
             )}
