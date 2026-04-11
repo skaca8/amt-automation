@@ -23,11 +23,14 @@ export default function PackageManagement() {
   const [hotels, setHotels] = useState([])
   const [tickets, setTickets] = useState([])
   const [hotelRooms, setHotelRooms] = useState({})
-  const [expandedPkg, setExpandedPkg] = useState(null)
+
+  // Inventory modal state
   const [showInventoryModal, setShowInventoryModal] = useState(false)
   const [inventoryPkg, setInventoryPkg] = useState(null)
-  const [inventoryData, setInventoryData] = useState([])
-  const [newInventory, setNewInventory] = useState({ date: '', price: '', quantity: '' })
+
+  // Promotions modal state
+  const [showPromotionsModal, setShowPromotionsModal] = useState(false)
+  const [promotionsPkg, setPromotionsPkg] = useState(null)
 
   const loadPackages = useCallback(async () => {
     setLoading(true)
@@ -86,7 +89,7 @@ export default function PackageManagement() {
       name_cn: pkg.name_cn || '',
       description_en: pkg.description_en || '',
       description_cn: pkg.description_cn || '',
-      price: pkg.price || '',
+      price: pkg.price || pkg.base_price || '',
       status: pkg.status || 'active',
       items: pkg.items || [],
       images: pkg.images || [],
@@ -143,41 +146,17 @@ export default function PackageManagement() {
     setForm({ ...form, items: form.items.filter((_, i) => i !== index) })
   }
 
-  const toggleExpand = (pkgId) => {
-    setExpandedPkg(expandedPkg === pkgId ? null : pkgId)
-  }
-
-  const openInventory = async (pkg) => {
+  const openInventoryModal = (pkg) => {
     setInventoryPkg(pkg)
     setShowInventoryModal(true)
-    try {
-      const res = await get(`/admin/packages/${pkg._id || pkg.id}/inventory`)
-      setInventoryData(res.inventory || res.data || res || [])
-    } catch {
-      setInventoryData([])
-    }
   }
 
-  const addInventory = async () => {
-    if (!newInventory.date || !newInventory.price || !newInventory.quantity) {
-      alert('Please fill all inventory fields')
-      return
-    }
-    try {
-      await post(`/admin/packages/${inventoryPkg._id || inventoryPkg.id}/inventory`, {
-        date: newInventory.date,
-        price: Number(newInventory.price),
-        quantity: Number(newInventory.quantity),
-      })
-      setNewInventory({ date: '', price: '', quantity: '' })
-      const res = await get(`/admin/packages/${inventoryPkg._id || inventoryPkg.id}/inventory`)
-      setInventoryData(res.inventory || res.data || res || [])
-    } catch (err) {
-      alert('Failed to add inventory: ' + err.message)
-    }
+  const openPromotionsModal = (pkg) => {
+    setPromotionsPkg(pkg)
+    setShowPromotionsModal(true)
   }
 
-  const formatCurrency = (v) => v != null ? '\u20a9' + Number(v).toLocaleString() : '-'
+  const formatCurrency = (v) => v != null && v !== '' ? '\u20a9' + Number(v).toLocaleString() : '-'
 
   if (loading) {
     return (
@@ -211,18 +190,17 @@ export default function PackageManagement() {
         <table>
           <thead>
             <tr>
-              <th style={{ width: 40 }}></th>
               <th>Name</th>
               <th>Items</th>
-              <th>Price</th>
+              <th>Base Price</th>
               <th>Status</th>
-              <th style={{ width: 200 }}>Actions</th>
+              <th style={{ width: 340 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {packages.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={5}>
                   <div className="table-empty">
                     <p>No packages found. Click "Add Package" to create one.</p>
                   </div>
@@ -231,59 +209,42 @@ export default function PackageManagement() {
             ) : (
               packages.map((pkg) => {
                 const pid = pkg._id || pkg.id
-                const isExpanded = expandedPkg === pid
                 return (
-                  <React.Fragment key={pid}>
-                    <tr>
-                      <td>
-                        <button
-                          className="btn btn-icon btn-secondary"
-                          style={{ width: 28, height: 28, fontSize: '0.7rem' }}
-                          onClick={() => toggleExpand(pid)}
-                        >
-                          {isExpanded ? '\u25BC' : '\u25B6'}
+                  <tr key={pid}>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{pkg.name_en}</div>
+                      {pkg.name_cn && (
+                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{pkg.name_cn}</div>
+                      )}
+                    </td>
+                    <td>{pkg.items?.length || 0} items</td>
+                    <td style={{ fontWeight: 600 }}>{formatCurrency(pkg.price || pkg.base_price)}</td>
+                    <td><StatusBadge status={pkg.status} /></td>
+                    <td>
+                      <div className="btn-group" style={{ flexWrap: 'wrap', gap: 4 }}>
+                        <button className="btn btn-sm btn-secondary" onClick={() => openEdit(pkg)}>
+                          Edit
                         </button>
-                      </td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{pkg.name_en}</div>
-                        {pkg.name_cn && (
-                          <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{pkg.name_cn}</div>
-                        )}
-                      </td>
-                      <td>{pkg.items?.length || 0} items</td>
-                      <td style={{ fontWeight: 600 }}>{formatCurrency(pkg.price)}</td>
-                      <td><StatusBadge status={pkg.status} /></td>
-                      <td>
-                        <div className="btn-group">
-                          <button className="btn btn-sm btn-secondary" onClick={() => openEdit(pkg)}>
-                            Edit
-                          </button>
-                          <button className="btn btn-sm btn-primary" onClick={() => openInventory(pkg)}>
-                            Inventory
-                          </button>
-                          <button className="btn btn-sm btn-danger" onClick={() => deletePackage(pkg)}>
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                    {isExpanded && (
-                      <tr>
-                        <td colSpan={6} style={{ background: '#f8fafc', padding: '16px 24px' }}>
-                          <div style={{ marginBottom: 24 }}>
-                            <h4 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 12 }}>
-                              Bulk Inventory Management
-                            </h4>
-                            <BulkInventoryManager
-                              productType="package"
-                              productId={pid}
-                            />
-                          </div>
-                          <PromotionManager productType="package" productId={pid} />
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: '#3b82f6', color: '#fff', border: 'none', fontWeight: 600 }}
+                          onClick={() => openInventoryModal(pkg)}
+                        >
+                          {'\uC7AC\uACE0 \uBC0F \uAC00\uACA9 \uAD00\uB9AC'}
+                        </button>
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: '#f59e0b', color: '#fff', border: 'none', fontWeight: 600 }}
+                          onClick={() => openPromotionsModal(pkg)}
+                        >
+                          {'\uD504\uB85C\uBAA8\uC158'}
+                        </button>
+                        <button className="btn btn-sm btn-danger" onClick={() => deletePackage(pkg)}>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
                 )
               })
             )}
@@ -344,7 +305,7 @@ export default function PackageManagement() {
         </div>
         <div className="form-row">
           <div className="form-group">
-            <label>Package Price (KRW)</label>
+            <label>Package Price ({'\u20a9'})</label>
             <input
               type="number"
               className="form-control"
@@ -488,82 +449,34 @@ export default function PackageManagement() {
         </div>
       </Modal>
 
-      {/* Inventory Modal */}
+      {/* Inventory & Pricing Modal (Large) */}
       <Modal
         isOpen={showInventoryModal}
-        onClose={() => { setShowInventoryModal(false); setInventoryData([]); setInventoryPkg(null) }}
-        title={`Inventory: ${inventoryPkg?.name_en || 'Package'}`}
-        size="lg"
+        onClose={() => { setShowInventoryModal(false); setInventoryPkg(null) }}
+        title={`\uC7AC\uACE0 \uBC0F \uAC00\uACA9 \uAD00\uB9AC: ${inventoryPkg?.name_en || 'Package'}`}
+        size="xl"
       >
-        <div style={{ marginBottom: 20 }}>
-          <h4 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 12 }}>Add Inventory</h4>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Date</label>
-              <input
-                type="date"
-                className="form-control"
-                value={newInventory.date}
-                onChange={(e) => setNewInventory({ ...newInventory, date: e.target.value })}
-              />
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Price (KRW)</label>
-              <input
-                type="number"
-                className="form-control"
-                value={newInventory.price}
-                onChange={(e) => setNewInventory({ ...newInventory, price: e.target.value })}
-                placeholder="0"
-              />
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Quantity</label>
-              <input
-                type="number"
-                className="form-control"
-                min={0}
-                value={newInventory.quantity}
-                onChange={(e) => setNewInventory({ ...newInventory, quantity: e.target.value })}
-                placeholder="0"
-              />
-            </div>
-            <button className="btn btn-primary" onClick={addInventory}>Add</button>
-          </div>
-        </div>
+        {inventoryPkg && (
+          <BulkInventoryManager
+            productType="package"
+            productId={inventoryPkg._id || inventoryPkg.id}
+          />
+        )}
+      </Modal>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Price</th>
-                <th>Total Qty</th>
-                <th>Available</th>
-                <th>Booked</th>
-              </tr>
-            </thead>
-            <tbody>
-              {inventoryData.length === 0 ? (
-                <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: 32, color: '#64748b' }}>
-                    No inventory data. Add dates above.
-                  </td>
-                </tr>
-              ) : (
-                inventoryData.map((inv, i) => (
-                  <tr key={i}>
-                    <td>{new Date(inv.date).toLocaleDateString()}</td>
-                    <td>{formatCurrency(inv.price)}</td>
-                    <td>{inv.quantity ?? inv.totalQuantity ?? '-'}</td>
-                    <td>{inv.available ?? inv.availableQuantity ?? '-'}</td>
-                    <td>{inv.booked ?? inv.bookedQuantity ?? '-'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+      {/* Promotions Modal (Large) */}
+      <Modal
+        isOpen={showPromotionsModal}
+        onClose={() => { setShowPromotionsModal(false); setPromotionsPkg(null) }}
+        title={`\uD504\uB85C\uBAA8\uC158 \uAD00\uB9AC: ${promotionsPkg?.name_en || 'Package'}`}
+        size="xl"
+      >
+        {promotionsPkg && (
+          <PromotionManager
+            productType="package"
+            productId={promotionsPkg._id || promotionsPkg.id}
+          />
+        )}
       </Modal>
     </div>
   )

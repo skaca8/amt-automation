@@ -20,11 +20,14 @@ export default function TicketManagement() {
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({ ...emptyTicket })
   const [saving, setSaving] = useState(false)
-  const [expandedTicket, setExpandedTicket] = useState(null)
+
+  // Inventory modal state
   const [showInventoryModal, setShowInventoryModal] = useState(false)
   const [inventoryTicket, setInventoryTicket] = useState(null)
-  const [inventoryData, setInventoryData] = useState([])
-  const [newInventory, setNewInventory] = useState({ date: '', price: '', quantity: '' })
+
+  // Promotions modal state
+  const [showPromotionsModal, setShowPromotionsModal] = useState(false)
+  const [promotionsTicket, setPromotionsTicket] = useState(null)
 
   const loadTickets = useCallback(async () => {
     setLoading(true)
@@ -57,7 +60,7 @@ export default function TicketManagement() {
       description_en: ticket.description_en || '',
       description_cn: ticket.description_cn || '',
       category: ticket.category || '',
-      price: ticket.price || '',
+      price: ticket.price || ticket.base_price || '',
       status: ticket.status || 'active',
       images: ticket.images || [],
     })
@@ -92,41 +95,17 @@ export default function TicketManagement() {
     }
   }
 
-  const toggleExpand = (ticketId) => {
-    setExpandedTicket(expandedTicket === ticketId ? null : ticketId)
-  }
-
-  const openInventory = async (ticket) => {
+  const openInventoryModal = (ticket) => {
     setInventoryTicket(ticket)
     setShowInventoryModal(true)
-    try {
-      const res = await get(`/admin/tickets/${ticket._id || ticket.id}/inventory`)
-      setInventoryData(res.inventory || res.data || res || [])
-    } catch {
-      setInventoryData([])
-    }
   }
 
-  const addInventory = async () => {
-    if (!newInventory.date || !newInventory.price || !newInventory.quantity) {
-      alert('Please fill all inventory fields')
-      return
-    }
-    try {
-      await post(`/admin/tickets/${inventoryTicket._id || inventoryTicket.id}/inventory`, {
-        date: newInventory.date,
-        price: Number(newInventory.price),
-        quantity: Number(newInventory.quantity),
-      })
-      setNewInventory({ date: '', price: '', quantity: '' })
-      const res = await get(`/admin/tickets/${inventoryTicket._id || inventoryTicket.id}/inventory`)
-      setInventoryData(res.inventory || res.data || res || [])
-    } catch (err) {
-      alert('Failed to add inventory: ' + err.message)
-    }
+  const openPromotionsModal = (ticket) => {
+    setPromotionsTicket(ticket)
+    setShowPromotionsModal(true)
   }
 
-  const formatCurrency = (v) => v != null ? '\u20a9' + Number(v).toLocaleString() : '-'
+  const formatCurrency = (v) => v != null && v !== '' ? '\u20a9' + Number(v).toLocaleString() : '-'
 
   if (loading) {
     return (
@@ -160,18 +139,17 @@ export default function TicketManagement() {
         <table>
           <thead>
             <tr>
-              <th style={{ width: 40 }}></th>
               <th>Name</th>
               <th>Category</th>
               <th>Base Price</th>
               <th>Status</th>
-              <th style={{ width: 200 }}>Actions</th>
+              <th style={{ width: 340 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {tickets.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={5}>
                   <div className="table-empty">
                     <p>No tickets found. Click "Add Ticket" to create one.</p>
                   </div>
@@ -180,59 +158,42 @@ export default function TicketManagement() {
             ) : (
               tickets.map((ticket) => {
                 const tid = ticket._id || ticket.id
-                const isExpanded = expandedTicket === tid
                 return (
-                  <React.Fragment key={tid}>
-                    <tr>
-                      <td>
-                        <button
-                          className="btn btn-icon btn-secondary"
-                          style={{ width: 28, height: 28, fontSize: '0.7rem' }}
-                          onClick={() => toggleExpand(tid)}
-                        >
-                          {isExpanded ? '\u25BC' : '\u25B6'}
+                  <tr key={tid}>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{ticket.name_en}</div>
+                      {ticket.name_cn && (
+                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{ticket.name_cn}</div>
+                      )}
+                    </td>
+                    <td style={{ textTransform: 'capitalize' }}>{ticket.category || '-'}</td>
+                    <td style={{ fontWeight: 600 }}>{formatCurrency(ticket.price || ticket.base_price)}</td>
+                    <td><StatusBadge status={ticket.status} /></td>
+                    <td>
+                      <div className="btn-group" style={{ flexWrap: 'wrap', gap: 4 }}>
+                        <button className="btn btn-sm btn-secondary" onClick={() => openEdit(ticket)}>
+                          Edit
                         </button>
-                      </td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{ticket.name_en}</div>
-                        {ticket.name_cn && (
-                          <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{ticket.name_cn}</div>
-                        )}
-                      </td>
-                      <td style={{ textTransform: 'capitalize' }}>{ticket.category || '-'}</td>
-                      <td style={{ fontWeight: 600 }}>{formatCurrency(ticket.price)}</td>
-                      <td><StatusBadge status={ticket.status} /></td>
-                      <td>
-                        <div className="btn-group">
-                          <button className="btn btn-sm btn-secondary" onClick={() => openEdit(ticket)}>
-                            Edit
-                          </button>
-                          <button className="btn btn-sm btn-primary" onClick={() => openInventory(ticket)}>
-                            Inventory
-                          </button>
-                          <button className="btn btn-sm btn-danger" onClick={() => deleteTicket(ticket)}>
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                    {isExpanded && (
-                      <tr>
-                        <td colSpan={6} style={{ background: '#f8fafc', padding: '16px 24px' }}>
-                          <div style={{ marginBottom: 24 }}>
-                            <h4 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 12 }}>
-                              Bulk Inventory Management
-                            </h4>
-                            <BulkInventoryManager
-                              productType="ticket"
-                              productId={tid}
-                            />
-                          </div>
-                          <PromotionManager productType="ticket" productId={tid} />
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: '#3b82f6', color: '#fff', border: 'none', fontWeight: 600 }}
+                          onClick={() => openInventoryModal(ticket)}
+                        >
+                          {'\uC7AC\uACE0 \uBC0F \uAC00\uACA9 \uAD00\uB9AC'}
+                        </button>
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: '#f59e0b', color: '#fff', border: 'none', fontWeight: 600 }}
+                          onClick={() => openPromotionsModal(ticket)}
+                        >
+                          {'\uD504\uB85C\uBAA8\uC158'}
+                        </button>
+                        <button className="btn btn-sm btn-danger" onClick={() => deleteTicket(ticket)}>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
                 )
               })
             )}
@@ -309,7 +270,7 @@ export default function TicketManagement() {
             </select>
           </div>
           <div className="form-group">
-            <label>Base Price (KRW)</label>
+            <label>Base Price ({'\u20a9'})</label>
             <input
               type="number"
               className="form-control"
@@ -339,82 +300,34 @@ export default function TicketManagement() {
         </div>
       </Modal>
 
-      {/* Inventory Modal */}
+      {/* Inventory & Pricing Modal (Large) */}
       <Modal
         isOpen={showInventoryModal}
-        onClose={() => { setShowInventoryModal(false); setInventoryData([]); setInventoryTicket(null) }}
-        title={`Inventory: ${inventoryTicket?.name_en || 'Ticket'}`}
-        size="lg"
+        onClose={() => { setShowInventoryModal(false); setInventoryTicket(null) }}
+        title={`\uC7AC\uACE0 \uBC0F \uAC00\uACA9 \uAD00\uB9AC: ${inventoryTicket?.name_en || 'Ticket'}`}
+        size="xl"
       >
-        <div style={{ marginBottom: 20 }}>
-          <h4 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 12 }}>Add Inventory</h4>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Date</label>
-              <input
-                type="date"
-                className="form-control"
-                value={newInventory.date}
-                onChange={(e) => setNewInventory({ ...newInventory, date: e.target.value })}
-              />
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Price (KRW)</label>
-              <input
-                type="number"
-                className="form-control"
-                value={newInventory.price}
-                onChange={(e) => setNewInventory({ ...newInventory, price: e.target.value })}
-                placeholder="0"
-              />
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Quantity</label>
-              <input
-                type="number"
-                className="form-control"
-                min={0}
-                value={newInventory.quantity}
-                onChange={(e) => setNewInventory({ ...newInventory, quantity: e.target.value })}
-                placeholder="0"
-              />
-            </div>
-            <button className="btn btn-primary" onClick={addInventory}>Add</button>
-          </div>
-        </div>
+        {inventoryTicket && (
+          <BulkInventoryManager
+            productType="ticket"
+            productId={inventoryTicket._id || inventoryTicket.id}
+          />
+        )}
+      </Modal>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Price</th>
-                <th>Total Qty</th>
-                <th>Available</th>
-                <th>Booked</th>
-              </tr>
-            </thead>
-            <tbody>
-              {inventoryData.length === 0 ? (
-                <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: 32, color: '#64748b' }}>
-                    No inventory data. Add dates above.
-                  </td>
-                </tr>
-              ) : (
-                inventoryData.map((inv, i) => (
-                  <tr key={i}>
-                    <td>{new Date(inv.date).toLocaleDateString()}</td>
-                    <td>{formatCurrency(inv.price)}</td>
-                    <td>{inv.quantity ?? inv.totalQuantity ?? '-'}</td>
-                    <td>{inv.available ?? inv.availableQuantity ?? '-'}</td>
-                    <td>{inv.booked ?? inv.bookedQuantity ?? '-'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+      {/* Promotions Modal (Large) */}
+      <Modal
+        isOpen={showPromotionsModal}
+        onClose={() => { setShowPromotionsModal(false); setPromotionsTicket(null) }}
+        title={`\uD504\uB85C\uBAA8\uC158 \uAD00\uB9AC: ${promotionsTicket?.name_en || 'Ticket'}`}
+        size="xl"
+      >
+        {promotionsTicket && (
+          <PromotionManager
+            productType="ticket"
+            productId={promotionsTicket._id || promotionsTicket.id}
+          />
+        )}
       </Modal>
     </div>
   )

@@ -14,8 +14,10 @@ const emptyHotel = {
 
 const emptyRoom = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
-  max_guests: 2, status: 'active', images: [],
+  max_guests: 2, bed_type: '', base_price: '', status: 'active', images: [],
 }
+
+const BED_TYPES = ['Single', 'Double', 'Twin', 'Queen', 'King', 'Suite']
 
 export default function HotelManagement() {
   const [hotels, setHotels] = useState([])
@@ -31,11 +33,14 @@ export default function HotelManagement() {
   const [showRoomModal, setShowRoomModal] = useState(false)
   const [editingRoom, setEditingRoom] = useState(null)
   const [roomForm, setRoomForm] = useState({ ...emptyRoom })
-  const [expandedRoom, setExpandedRoom] = useState(null)
+
+  // Inventory modal state
   const [showInventoryModal, setShowInventoryModal] = useState(false)
   const [inventoryRoom, setInventoryRoom] = useState(null)
-  const [inventoryData, setInventoryData] = useState([])
-  const [newInventory, setNewInventory] = useState({ date: '', price: '', quantity: '' })
+
+  // Promotions modal state
+  const [showPromotionsModal, setShowPromotionsModal] = useState(false)
+  const [promotionsHotelId, setPromotionsHotelId] = useState(null)
 
   const loadHotels = useCallback(async () => {
     setLoading(true)
@@ -70,10 +75,8 @@ export default function HotelManagement() {
     if (expandedHotel === hotelId) {
       setExpandedHotel(null)
       setRoomTypes([])
-      setExpandedRoom(null)
     } else {
       setExpandedHotel(hotelId)
-      setExpandedRoom(null)
       loadRoomTypes(hotelId)
     }
   }
@@ -148,6 +151,8 @@ export default function HotelManagement() {
       description_en: room.description_en || '',
       description_cn: room.description_cn || '',
       max_guests: room.max_guests || room.maxGuests || 2,
+      bed_type: room.bed_type || '',
+      base_price: room.base_price || '',
       status: room.status || 'active',
       images: room.images || [],
     })
@@ -157,7 +162,11 @@ export default function HotelManagement() {
   const saveRoom = async () => {
     setSaving(true)
     try {
-      const payload = { ...roomForm, max_guests: Number(roomForm.max_guests) }
+      const payload = {
+        ...roomForm,
+        max_guests: Number(roomForm.max_guests),
+        base_price: Number(roomForm.base_price) || 0,
+      }
       if (editingRoom) {
         await put(`/admin/hotels/${expandedHotel}/rooms/${editingRoom._id || editingRoom.id}`, payload)
       } else {
@@ -182,42 +191,19 @@ export default function HotelManagement() {
     }
   }
 
-  // Inventory
-  const openInventory = async (room) => {
+  // Inventory modal
+  const openInventoryModal = (room) => {
     setInventoryRoom(room)
     setShowInventoryModal(true)
-    try {
-      const res = await get(`/admin/hotels/${expandedHotel}/rooms/${room._id || room.id}/inventory`)
-      setInventoryData(res.inventory || res.data || res || [])
-    } catch {
-      setInventoryData([])
-    }
   }
 
-  const addInventory = async () => {
-    if (!newInventory.date || !newInventory.price || !newInventory.quantity) {
-      alert('Please fill all inventory fields')
-      return
-    }
-    try {
-      await post(`/admin/hotels/${expandedHotel}/rooms/${inventoryRoom._id || inventoryRoom.id}/inventory`, {
-        date: newInventory.date,
-        price: Number(newInventory.price),
-        quantity: Number(newInventory.quantity),
-      })
-      setNewInventory({ date: '', price: '', quantity: '' })
-      const res = await get(`/admin/hotels/${expandedHotel}/rooms/${inventoryRoom._id || inventoryRoom.id}/inventory`)
-      setInventoryData(res.inventory || res.data || res || [])
-    } catch (err) {
-      alert('Failed to add inventory: ' + err.message)
-    }
+  // Promotions modal
+  const openPromotionsModal = (hotelId) => {
+    setPromotionsHotelId(hotelId)
+    setShowPromotionsModal(true)
   }
 
-  const toggleRoomExpand = (roomId) => {
-    setExpandedRoom(expandedRoom === roomId ? null : roomId)
-  }
-
-  const formatCurrency = (v) => v != null ? '\u20a9' + Number(v).toLocaleString() : '-'
+  const formatCurrency = (v) => v != null && v !== '' ? '\u20a9' + Number(v).toLocaleString() : '-'
 
   if (loading) {
     return (
@@ -309,9 +295,18 @@ export default function HotelManagement() {
                         <td colSpan={6} style={{ background: '#f8fafc', padding: '16px 24px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                             <h4 style={{ fontSize: '1rem', fontWeight: 600 }}>Room Types</h4>
-                            <button className="btn btn-sm btn-primary" onClick={openAddRoom}>
-                              + Add Room Type
-                            </button>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button
+                                className="btn btn-sm"
+                                style={{ background: '#f59e0b', color: '#fff', border: 'none', fontWeight: 600 }}
+                                onClick={() => openPromotionsModal(hid)}
+                              >
+                                {'\uD504\uB85C\uBAA8\uC158'} Promotions
+                              </button>
+                              <button className="btn btn-sm btn-primary" onClick={openAddRoom}>
+                                + Add Room Type
+                              </button>
+                            </div>
                           </div>
                           {loadingRooms ? (
                             <div style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>Loading rooms...</div>
@@ -323,72 +318,52 @@ export default function HotelManagement() {
                             <table style={{ background: '#ffffff', borderRadius: 8 }}>
                               <thead>
                                 <tr>
-                                  <th style={{ width: 32 }}></th>
                                   <th>Name</th>
+                                  <th>Base Price</th>
+                                  <th>Bed Type</th>
                                   <th>Max Guests</th>
                                   <th>Status</th>
-                                  <th>Actions</th>
+                                  <th style={{ width: 320 }}>Actions</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {roomTypes.map((room) => {
                                   const rid = room._id || room.id
-                                  const isRoomExpanded = expandedRoom === rid
                                   return (
-                                    <React.Fragment key={rid}>
-                                      <tr>
-                                        <td>
-                                          <button
-                                            className="btn btn-icon btn-secondary"
-                                            style={{ width: 24, height: 24, fontSize: '0.6rem' }}
-                                            onClick={() => toggleRoomExpand(rid)}
-                                          >
-                                            {isRoomExpanded ? '\u25BC' : '\u25B6'}
+                                    <tr key={rid}>
+                                      <td>
+                                        <div style={{ fontWeight: 500 }}>{room.name_en}</div>
+                                        {room.name_cn && (
+                                          <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{room.name_cn}</div>
+                                        )}
+                                      </td>
+                                      <td style={{ fontWeight: 600 }}>{formatCurrency(room.base_price)}</td>
+                                      <td>{room.bed_type || '-'}</td>
+                                      <td>{room.max_guests || room.maxGuests || '-'}</td>
+                                      <td><StatusBadge status={room.status} /></td>
+                                      <td>
+                                        <div className="btn-group" style={{ flexWrap: 'wrap', gap: 4 }}>
+                                          <button className="btn btn-sm btn-secondary" onClick={() => openEditRoom(room)}>
+                                            Edit
                                           </button>
-                                        </td>
-                                        <td>
-                                          <div style={{ fontWeight: 500 }}>{room.name_en}</div>
-                                          {room.name_cn && (
-                                            <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{room.name_cn}</div>
-                                          )}
-                                        </td>
-                                        <td>{room.max_guests || room.maxGuests || '-'}</td>
-                                        <td><StatusBadge status={room.status} /></td>
-                                        <td>
-                                          <div className="btn-group">
-                                            <button className="btn btn-sm btn-secondary" onClick={() => openEditRoom(room)}>
-                                              Edit
-                                            </button>
-                                            <button className="btn btn-sm btn-primary" onClick={() => openInventory(room)}>
-                                              Inventory
-                                            </button>
-                                            <button className="btn btn-sm btn-danger" onClick={() => deleteRoom(room)}>
-                                              Delete
-                                            </button>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                      {isRoomExpanded && (
-                                        <tr>
-                                          <td colSpan={5} style={{ padding: '16px 12px', background: '#f1f5f9' }}>
-                                            <BulkInventoryManager
-                                              productType="room"
-                                              productId={rid}
-                                            />
-                                          </td>
-                                        </tr>
-                                      )}
-                                    </React.Fragment>
+                                          <button
+                                            className="btn btn-sm"
+                                            style={{ background: '#3b82f6', color: '#fff', border: 'none', fontWeight: 600 }}
+                                            onClick={() => openInventoryModal(room)}
+                                          >
+                                            {'\uC7AC\uACE0 \uBC0F \uAC00\uACA9 \uAD00\uB9AC'}
+                                          </button>
+                                          <button className="btn btn-sm btn-danger" onClick={() => deleteRoom(room)}>
+                                            Delete
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
                                   )
                                 })}
                               </tbody>
                             </table>
                           )}
-
-                          {/* Promotions for this hotel */}
-                          <div style={{ marginTop: 24 }}>
-                            <PromotionManager productType="hotel" productId={hid} />
-                          </div>
                         </td>
                       </tr>
                     )}
@@ -544,6 +519,32 @@ export default function HotelManagement() {
         </div>
         <div className="form-row">
           <div className="form-group">
+            <label>Base Price ({'\u20a9'}) *</label>
+            <input
+              type="number"
+              className="form-control"
+              min={0}
+              value={roomForm.base_price}
+              onChange={(e) => setRoomForm({ ...roomForm, base_price: e.target.value })}
+              placeholder="e.g. 150000"
+            />
+          </div>
+          <div className="form-group">
+            <label>Bed Type</label>
+            <select
+              className="form-control"
+              value={roomForm.bed_type}
+              onChange={(e) => setRoomForm({ ...roomForm, bed_type: e.target.value })}
+            >
+              <option value="">Select bed type</option>
+              {BED_TYPES.map((bt) => (
+                <option key={bt} value={bt}>{bt}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="form-row">
+          <div className="form-group">
             <label>Max Guests</label>
             <input
               type="number"
@@ -574,82 +575,31 @@ export default function HotelManagement() {
         </div>
       </Modal>
 
-      {/* Inventory Modal */}
+      {/* Inventory & Pricing Modal (Large) */}
       <Modal
         isOpen={showInventoryModal}
-        onClose={() => { setShowInventoryModal(false); setInventoryData([]); setInventoryRoom(null) }}
-        title={`Inventory: ${inventoryRoom?.name_en || 'Room'}`}
-        size="lg"
+        onClose={() => { setShowInventoryModal(false); setInventoryRoom(null) }}
+        title={`\uC7AC\uACE0 \uBC0F \uAC00\uACA9 \uAD00\uB9AC: ${inventoryRoom?.name_en || 'Room'}`}
+        size="xl"
       >
-        <div style={{ marginBottom: 20 }}>
-          <h4 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 12 }}>Add Inventory</h4>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Date</label>
-              <input
-                type="date"
-                className="form-control"
-                value={newInventory.date}
-                onChange={(e) => setNewInventory({ ...newInventory, date: e.target.value })}
-              />
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Price (KRW)</label>
-              <input
-                type="number"
-                className="form-control"
-                value={newInventory.price}
-                onChange={(e) => setNewInventory({ ...newInventory, price: e.target.value })}
-                placeholder="0"
-              />
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Quantity</label>
-              <input
-                type="number"
-                className="form-control"
-                min={0}
-                value={newInventory.quantity}
-                onChange={(e) => setNewInventory({ ...newInventory, quantity: e.target.value })}
-                placeholder="0"
-              />
-            </div>
-            <button className="btn btn-primary" onClick={addInventory}>Add</button>
-          </div>
-        </div>
+        {inventoryRoom && (
+          <BulkInventoryManager
+            productType="room"
+            productId={inventoryRoom._id || inventoryRoom.id}
+          />
+        )}
+      </Modal>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Price</th>
-                <th>Total Qty</th>
-                <th>Available</th>
-                <th>Booked</th>
-              </tr>
-            </thead>
-            <tbody>
-              {inventoryData.length === 0 ? (
-                <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: 32, color: '#64748b' }}>
-                    No inventory data. Add dates above.
-                  </td>
-                </tr>
-              ) : (
-                inventoryData.map((inv, i) => (
-                  <tr key={i}>
-                    <td>{new Date(inv.date).toLocaleDateString()}</td>
-                    <td>{formatCurrency(inv.price)}</td>
-                    <td>{inv.quantity ?? inv.totalQuantity ?? '-'}</td>
-                    <td>{inv.available ?? inv.availableQuantity ?? '-'}</td>
-                    <td>{inv.booked ?? inv.bookedQuantity ?? '-'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+      {/* Promotions Modal (Large) */}
+      <Modal
+        isOpen={showPromotionsModal}
+        onClose={() => { setShowPromotionsModal(false); setPromotionsHotelId(null) }}
+        title={`\uD504\uB85C\uBAA8\uC158 \uAD00\uB9AC (Hotel Promotions)`}
+        size="xl"
+      >
+        {promotionsHotelId && (
+          <PromotionManager productType="hotel" productId={promotionsHotelId} />
+        )}
       </Modal>
     </div>
   )

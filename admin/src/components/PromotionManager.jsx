@@ -10,12 +10,15 @@ const emptyPromotion = {
   start_date: '',
   end_date: '',
   status: 'active',
+  blackout_dates: [],
 }
+
+const emptyBlackout = { start_date: '', end_date: '', reason: '' }
 
 const styles = {
   container: {
     background: '#fff',
-    borderRadius: 8,
+    borderRadius: 10,
     border: '1px solid #e2e8f0',
     overflow: 'hidden',
   },
@@ -25,11 +28,17 @@ const styles = {
     alignItems: 'center',
     padding: '16px 20px',
     borderBottom: '1px solid #e2e8f0',
+    background: '#f8fafc',
   },
   title: {
-    fontSize: '1rem',
-    fontWeight: 600,
+    fontSize: '1.05rem',
+    fontWeight: 700,
     color: '#1e293b',
+    margin: 0,
+  },
+  subtitle: {
+    fontSize: '0.8rem',
+    color: '#64748b',
     margin: 0,
   },
   btn: {
@@ -38,7 +47,7 @@ const styles = {
     border: 'none',
     cursor: 'pointer',
     fontSize: '0.85rem',
-    fontWeight: 500,
+    fontWeight: 600,
     fontFamily: 'inherit',
     transition: 'opacity 0.15s',
   },
@@ -70,22 +79,22 @@ const styles = {
   },
   th: {
     textAlign: 'left',
-    padding: '10px 16px',
+    padding: '10px 14px',
     borderBottom: '2px solid #e2e8f0',
-    fontWeight: 600,
+    fontWeight: 700,
     color: '#475569',
     whiteSpace: 'nowrap',
     fontSize: '0.8rem',
   },
   td: {
-    padding: '10px 16px',
+    padding: '10px 14px',
     borderBottom: '1px solid #f1f5f9',
     whiteSpace: 'nowrap',
   },
   form: {
     padding: 20,
     borderBottom: '1px solid #e2e8f0',
-    background: '#f8fafc',
+    background: '#fafbfc',
   },
   formRow: {
     display: 'flex',
@@ -102,7 +111,7 @@ const styles = {
   },
   label: {
     fontSize: '0.8rem',
-    fontWeight: 500,
+    fontWeight: 600,
     color: '#475569',
   },
   input: {
@@ -138,13 +147,14 @@ const styles = {
     fontSize: '0.85rem',
     color: '#334155',
     cursor: 'pointer',
+    fontWeight: 500,
   },
   badge: {
     display: 'inline-block',
     padding: '2px 8px',
     borderRadius: 12,
     fontSize: '0.75rem',
-    fontWeight: 600,
+    fontWeight: 700,
   },
   badgeActive: {
     background: '#dcfce7',
@@ -155,7 +165,7 @@ const styles = {
     color: '#64748b',
   },
   discountDisplay: {
-    fontWeight: 600,
+    fontWeight: 700,
     color: '#3b82f6',
   },
   empty: {
@@ -171,14 +181,48 @@ const styles = {
   },
   prefix: {
     fontSize: '0.85rem',
-    fontWeight: 600,
+    fontWeight: 700,
     color: '#475569',
+  },
+  blackoutSection: {
+    marginTop: 16,
+    padding: 16,
+    background: '#fff',
+    border: '1px solid #e2e8f0',
+    borderRadius: 8,
+  },
+  blackoutTitle: {
+    fontSize: '0.9rem',
+    fontWeight: 700,
+    color: '#1e293b',
+    marginBottom: 12,
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  blackoutEntry: {
+    display: 'flex',
+    gap: 8,
+    alignItems: 'flex-end',
+    marginBottom: 8,
+    padding: 10,
+    background: '#fef2f2',
+    border: '1px solid #fecaca',
+    borderRadius: 6,
+    flexWrap: 'wrap',
+  },
+  blackoutEmpty: {
+    padding: 16,
+    textAlign: 'center',
+    color: '#94a3b8',
+    fontSize: '0.85rem',
+    fontStyle: 'italic',
   },
 }
 
 function formatDiscount(type, value) {
-  if (type === 'percentage') return `${value}% off`
-  return `\u20a9${Number(value).toLocaleString()} off`
+  if (type === 'percentage') return `${value}%`
+  return `\u20a9${Number(value).toLocaleString()}`
 }
 
 export default function PromotionManager({ productType, productId }) {
@@ -217,12 +261,21 @@ export default function PromotionManager({ productType, productId }) {
       ...emptyPromotion,
       product_type: productType || 'all',
       product_id: productId || '',
+      blackout_dates: [],
     })
     setShowForm(true)
   }
 
   const openEdit = (promo) => {
     setEditing(promo)
+    let blackouts = []
+    if (promo.blackout_dates) {
+      if (typeof promo.blackout_dates === 'string') {
+        try { blackouts = JSON.parse(promo.blackout_dates) } catch { blackouts = [] }
+      } else if (Array.isArray(promo.blackout_dates)) {
+        blackouts = promo.blackout_dates
+      }
+    }
     setForm({
       name: promo.name || '',
       discount_type: promo.discount_type || 'percentage',
@@ -232,6 +285,7 @@ export default function PromotionManager({ productType, productId }) {
       start_date: promo.start_date ? promo.start_date.substring(0, 10) : '',
       end_date: promo.end_date ? promo.end_date.substring(0, 10) : '',
       status: promo.status || 'active',
+      blackout_dates: blackouts,
     })
     setShowForm(true)
   }
@@ -240,6 +294,26 @@ export default function PromotionManager({ productType, productId }) {
     setShowForm(false)
     setEditing(null)
     setForm({ ...emptyPromotion })
+  }
+
+  const addBlackoutEntry = () => {
+    setForm({
+      ...form,
+      blackout_dates: [...form.blackout_dates, { ...emptyBlackout }],
+    })
+  }
+
+  const updateBlackoutEntry = (index, field, value) => {
+    const updated = [...form.blackout_dates]
+    updated[index] = { ...updated[index], [field]: value }
+    setForm({ ...form, blackout_dates: updated })
+  }
+
+  const removeBlackoutEntry = (index) => {
+    setForm({
+      ...form,
+      blackout_dates: form.blackout_dates.filter((_, i) => i !== index),
+    })
   }
 
   const savePromotion = async () => {
@@ -256,6 +330,7 @@ export default function PromotionManager({ productType, productId }) {
       const payload = {
         ...form,
         discount_value: Number(form.discount_value),
+        blackout_dates: JSON.stringify(form.blackout_dates || []),
       }
       if (editing) {
         await put(`/admin/promotions/${editing._id || editing.id}`, payload)
@@ -283,15 +358,26 @@ export default function PromotionManager({ productType, productId }) {
     }
   }
 
-  const productTypeLabel = (type) => {
-    const map = { all: 'All', hotel: 'Hotel', ticket: 'Ticket', package: 'Package' }
-    return map[type] || type || 'All'
+  const formatBlackoutSummary = (promo) => {
+    let blackouts = []
+    if (promo.blackout_dates) {
+      if (typeof promo.blackout_dates === 'string') {
+        try { blackouts = JSON.parse(promo.blackout_dates) } catch { blackouts = [] }
+      } else if (Array.isArray(promo.blackout_dates)) {
+        blackouts = promo.blackout_dates
+      }
+    }
+    if (!blackouts || blackouts.length === 0) return 'None'
+    return `${blackouts.length} period(s)`
   }
 
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h4 style={styles.title}>Promotions</h4>
+        <div>
+          <h4 style={styles.title}>{'\uD504\uB85C\uBAA8\uC158 \uAD00\uB9AC'} (Promotions)</h4>
+          <p style={styles.subtitle}>Manage discount promotions and blackout periods</p>
+        </div>
         <button
           style={{ ...styles.btn, ...styles.btnPrimary }}
           onClick={openAdd}
@@ -337,7 +423,7 @@ export default function PromotionManager({ productType, productId }) {
                     checked={form.discount_type === 'fixed'}
                     onChange={(e) => setForm({ ...form, discount_type: e.target.value })}
                   />
-                  Fixed Amount ({'\uC815\uC561'})
+                  {'\uC815\uC561'} (Fixed {'\u20a9'})
                 </label>
                 <label style={styles.radioLabel}>
                   <input
@@ -347,7 +433,7 @@ export default function PromotionManager({ productType, productId }) {
                     checked={form.discount_type === 'percentage'}
                     onChange={(e) => setForm({ ...form, discount_type: e.target.value })}
                   />
-                  Percentage ({'\uC815\uB960'})
+                  {'\uC815\uB960'} (Percentage %)
                 </label>
               </div>
             </div>
@@ -418,7 +504,73 @@ export default function PromotionManager({ productType, productId }) {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          {/* Blackout Dates Section */}
+          <div style={styles.blackoutSection}>
+            <div style={styles.blackoutTitle}>
+              <span>{'\uBE14\uB799\uC544\uC6C3 \uAE30\uAC04'} (Blackout Dates)</span>
+              <button
+                style={{ ...styles.btn, ...styles.btnSecondary, ...styles.btnSm }}
+                onClick={addBlackoutEntry}
+              >
+                + Add Blackout Period
+              </button>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 0, marginBottom: 12 }}>
+              Periods when this promotion does NOT apply.
+            </p>
+
+            {form.blackout_dates.length === 0 ? (
+              <div style={styles.blackoutEmpty}>
+                No blackout periods. This promotion applies to all dates within its range.
+              </div>
+            ) : (
+              form.blackout_dates.map((bo, idx) => (
+                <div key={idx} style={styles.blackoutEntry}>
+                  <div style={{ ...styles.formGroup, flex: 'none', minWidth: 140 }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991b1b' }}>Start</span>
+                    <input
+                      type="date"
+                      style={{ ...styles.input, borderColor: '#fecaca' }}
+                      value={bo.start_date}
+                      onChange={(e) => updateBlackoutEntry(idx, 'start_date', e.target.value)}
+                    />
+                  </div>
+                  <div style={{ ...styles.formGroup, flex: 'none', minWidth: 140 }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991b1b' }}>End</span>
+                    <input
+                      type="date"
+                      style={{ ...styles.input, borderColor: '#fecaca' }}
+                      value={bo.end_date}
+                      onChange={(e) => updateBlackoutEntry(idx, 'end_date', e.target.value)}
+                    />
+                  </div>
+                  <div style={{ ...styles.formGroup, flex: 1, minWidth: 120 }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991b1b' }}>Reason (optional)</span>
+                    <input
+                      style={{ ...styles.input, borderColor: '#fecaca' }}
+                      value={bo.reason}
+                      onChange={(e) => updateBlackoutEntry(idx, 'reason', e.target.value)}
+                      placeholder="e.g. Holiday peak"
+                    />
+                  </div>
+                  <button
+                    style={{
+                      ...styles.btn,
+                      ...styles.btnDanger,
+                      ...styles.btnSm,
+                      marginBottom: 0,
+                      alignSelf: 'flex-end',
+                    }}
+                    onClick={() => removeBlackoutEntry(idx)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
             <button
               style={{ ...styles.btn, ...styles.btnPrimary, opacity: saving ? 0.7 : 1 }}
               onClick={savePromotion}
@@ -444,7 +596,7 @@ export default function PromotionManager({ productType, productId }) {
           </div>
         ) : promotions.length === 0 ? (
           <div style={styles.empty}>
-            No promotions found. Click "Add Promotion" to create one.
+            No promotions found. Click "+ Add Promotion" to create one.
           </div>
         ) : (
           <table style={styles.table}>
@@ -452,9 +604,9 @@ export default function PromotionManager({ productType, productId }) {
               <tr>
                 <th style={styles.th}>Name</th>
                 <th style={styles.th}>Type</th>
-                <th style={styles.th}>Discount</th>
-                <th style={styles.th}>Product</th>
-                <th style={styles.th}>Date Range</th>
+                <th style={styles.th}>Value</th>
+                <th style={styles.th}>Period</th>
+                <th style={styles.th}>Blackout</th>
                 <th style={styles.th}>Status</th>
                 <th style={{ ...styles.th, width: 120 }}>Actions</th>
               </tr>
@@ -466,25 +618,26 @@ export default function PromotionManager({ productType, productId }) {
                 const dvalue = promo.discount_value ?? promo.value ?? 0
                 return (
                   <tr key={pid}>
-                    <td style={{ ...styles.td, fontWeight: 500 }}>{promo.name}</td>
+                    <td style={{ ...styles.td, fontWeight: 600 }}>{promo.name}</td>
                     <td style={styles.td}>
-                      {dtype === 'fixed' ? 'Fixed (\uC815\uC561)' : 'Percentage (\uC815\uB960)'}
+                      {dtype === 'fixed' ? '\uC815\uC561 (Fixed)' : '\uC815\uB960 (%)'}
                     </td>
                     <td style={{ ...styles.td, ...styles.discountDisplay }}>
                       {formatDiscount(dtype, dvalue)}
                     </td>
                     <td style={styles.td}>
-                      {productTypeLabel(promo.product_type)}
-                      {promo.product_id && (
-                        <span style={{ fontSize: '0.75rem', color: '#94a3b8', marginLeft: 4 }}>
-                          #{promo.product_id.substring(0, 8)}
-                        </span>
-                      )}
-                    </td>
-                    <td style={styles.td}>
                       {promo.start_date ? promo.start_date.substring(0, 10) : '-'}
                       {' ~ '}
                       {promo.end_date ? promo.end_date.substring(0, 10) : '-'}
+                    </td>
+                    <td style={styles.td}>
+                      <span style={{
+                        fontSize: '0.8rem',
+                        color: formatBlackoutSummary(promo) === 'None' ? '#94a3b8' : '#ef4444',
+                        fontWeight: formatBlackoutSummary(promo) === 'None' ? 400 : 600,
+                      }}>
+                        {formatBlackoutSummary(promo)}
+                      </span>
                     </td>
                     <td style={styles.td}>
                       <span
