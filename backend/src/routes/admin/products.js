@@ -18,7 +18,8 @@ router.get('/', (req, res) => {
     const hotels = db.prepare('SELECT * FROM hotels ORDER BY id DESC').all();
     const result = hotels.map(h => ({
       ...h,
-      amenities: JSON.parse(h.amenities || '[]')
+      amenities: JSON.parse(h.amenities || '[]'),
+      images: JSON.parse(h.images || '[]')
     }));
     res.json({ hotels: result });
   } catch (err) {
@@ -31,23 +32,24 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   try {
     const db = getDb();
-    const { name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, status } = req.body;
+    const { name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, images, status } = req.body;
 
     if (!name_en) {
       return res.status(400).json({ error: 'name_en is required.' });
     }
 
     const result = db.prepare(`
-      INSERT INTO hotels (name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO hotels (name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, images, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       name_en, name_cn || null, description_en || null, description_cn || null,
       address || null, image_url || null, rating || 0,
-      JSON.stringify(amenities || []), status || 'active'
+      JSON.stringify(amenities || []), JSON.stringify(images || []), status || 'active'
     );
 
     const hotel = db.prepare('SELECT * FROM hotels WHERE id = ?').get(result.lastInsertRowid);
     hotel.amenities = JSON.parse(hotel.amenities || '[]');
+    hotel.images = JSON.parse(hotel.images || '[]');
 
     res.status(201).json({ message: 'Hotel created.', hotel });
   } catch (err) {
@@ -65,7 +67,7 @@ router.put('/:id', (req, res) => {
       return res.status(404).json({ error: 'Hotel not found.' });
     }
 
-    const { name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, status } = req.body;
+    const { name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, images, status } = req.body;
 
     const updates = [];
     const values = [];
@@ -78,6 +80,7 @@ router.put('/:id', (req, res) => {
     if (image_url !== undefined) { updates.push('image_url = ?'); values.push(image_url); }
     if (rating !== undefined) { updates.push('rating = ?'); values.push(rating); }
     if (amenities !== undefined) { updates.push('amenities = ?'); values.push(JSON.stringify(amenities)); }
+    if (images !== undefined) { updates.push('images = ?'); values.push(JSON.stringify(images)); }
     if (status !== undefined) { updates.push('status = ?'); values.push(status); }
 
     if (updates.length === 0) {
@@ -89,6 +92,7 @@ router.put('/:id', (req, res) => {
 
     const updated = db.prepare('SELECT * FROM hotels WHERE id = ?').get(req.params.id);
     updated.amenities = JSON.parse(updated.amenities || '[]');
+    updated.images = JSON.parse(updated.images || '[]');
 
     res.json({ message: 'Hotel updated.', hotel: updated });
   } catch (err) {
@@ -137,7 +141,8 @@ router.get('/room-types', (req, res) => {
     const roomTypes = db.prepare(query).all(...params);
     const result = roomTypes.map(rt => ({
       ...rt,
-      amenities: JSON.parse(rt.amenities || '[]')
+      amenities: JSON.parse(rt.amenities || '[]'),
+      images: JSON.parse(rt.images || '[]')
     }));
 
     res.json({ room_types: result });
@@ -151,7 +156,7 @@ router.get('/room-types', (req, res) => {
 router.post('/room-types', (req, res) => {
   try {
     const db = getDb();
-    const { hotel_id, name_en, name_cn, description_en, description_cn, max_guests, bed_type, amenities, image_url, base_price, status } = req.body;
+    const { hotel_id, name_en, name_cn, description_en, description_cn, max_guests, bed_type, amenities, image_url, images, base_price, status } = req.body;
 
     if (!hotel_id || !name_en || base_price === undefined) {
       return res.status(400).json({ error: 'hotel_id, name_en, and base_price are required.' });
@@ -163,16 +168,17 @@ router.post('/room-types', (req, res) => {
     }
 
     const result = db.prepare(`
-      INSERT INTO room_types (hotel_id, name_en, name_cn, description_en, description_cn, max_guests, bed_type, amenities, image_url, base_price, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO room_types (hotel_id, name_en, name_cn, description_en, description_cn, max_guests, bed_type, amenities, image_url, images, base_price, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       hotel_id, name_en, name_cn || null, description_en || null, description_cn || null,
       max_guests || 2, bed_type || null, JSON.stringify(amenities || []),
-      image_url || null, base_price, status || 'active'
+      image_url || null, JSON.stringify(images || []), base_price, status || 'active'
     );
 
     const roomType = db.prepare('SELECT * FROM room_types WHERE id = ?').get(result.lastInsertRowid);
     roomType.amenities = JSON.parse(roomType.amenities || '[]');
+    roomType.images = JSON.parse(roomType.images || '[]');
 
     res.status(201).json({ message: 'Room type created.', room_type: roomType });
   } catch (err) {
@@ -190,7 +196,7 @@ router.put('/room-types/:id', (req, res) => {
       return res.status(404).json({ error: 'Room type not found.' });
     }
 
-    const { hotel_id, name_en, name_cn, description_en, description_cn, max_guests, bed_type, amenities, image_url, base_price, status } = req.body;
+    const { hotel_id, name_en, name_cn, description_en, description_cn, max_guests, bed_type, amenities, image_url, images, base_price, status } = req.body;
 
     const updates = [];
     const values = [];
@@ -204,6 +210,7 @@ router.put('/room-types/:id', (req, res) => {
     if (bed_type !== undefined) { updates.push('bed_type = ?'); values.push(bed_type); }
     if (amenities !== undefined) { updates.push('amenities = ?'); values.push(JSON.stringify(amenities)); }
     if (image_url !== undefined) { updates.push('image_url = ?'); values.push(image_url); }
+    if (images !== undefined) { updates.push('images = ?'); values.push(JSON.stringify(images)); }
     if (base_price !== undefined) { updates.push('base_price = ?'); values.push(base_price); }
     if (status !== undefined) { updates.push('status = ?'); values.push(status); }
 
@@ -216,6 +223,7 @@ router.put('/room-types/:id', (req, res) => {
 
     const updated = db.prepare('SELECT * FROM room_types WHERE id = ?').get(req.params.id);
     updated.amenities = JSON.parse(updated.amenities || '[]');
+    updated.images = JSON.parse(updated.images || '[]');
 
     res.json({ message: 'Room type updated.', room_type: updated });
   } catch (err) {
@@ -261,22 +269,23 @@ router.get('/tickets', (req, res) => {
 router.post('/tickets', (req, res) => {
   try {
     const db = getDb();
-    const { name_en, name_cn, description_en, description_cn, category, image_url, base_price, duration, location, status } = req.body;
+    const { name_en, name_cn, description_en, description_cn, category, image_url, images, base_price, duration, location, status } = req.body;
 
     if (!name_en || base_price === undefined) {
       return res.status(400).json({ error: 'name_en and base_price are required.' });
     }
 
     const result = db.prepare(`
-      INSERT INTO tickets (name_en, name_cn, description_en, description_cn, category, image_url, base_price, duration, location, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tickets (name_en, name_cn, description_en, description_cn, category, image_url, images, base_price, duration, location, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       name_en, name_cn || null, description_en || null, description_cn || null,
-      category || null, image_url || null, base_price,
+      category || null, image_url || null, JSON.stringify(images || []), base_price,
       duration || null, location || null, status || 'active'
     );
 
     const ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(result.lastInsertRowid);
+    ticket.images = JSON.parse(ticket.images || '[]');
     res.status(201).json({ message: 'Ticket created.', ticket });
   } catch (err) {
     console.error('Admin create ticket error:', err);
@@ -293,7 +302,7 @@ router.put('/tickets/:id', (req, res) => {
       return res.status(404).json({ error: 'Ticket not found.' });
     }
 
-    const { name_en, name_cn, description_en, description_cn, category, image_url, base_price, duration, location, status } = req.body;
+    const { name_en, name_cn, description_en, description_cn, category, image_url, images, base_price, duration, location, status } = req.body;
 
     const updates = [];
     const values = [];
@@ -304,6 +313,7 @@ router.put('/tickets/:id', (req, res) => {
     if (description_cn !== undefined) { updates.push('description_cn = ?'); values.push(description_cn); }
     if (category !== undefined) { updates.push('category = ?'); values.push(category); }
     if (image_url !== undefined) { updates.push('image_url = ?'); values.push(image_url); }
+    if (images !== undefined) { updates.push('images = ?'); values.push(JSON.stringify(images)); }
     if (base_price !== undefined) { updates.push('base_price = ?'); values.push(base_price); }
     if (duration !== undefined) { updates.push('duration = ?'); values.push(duration); }
     if (location !== undefined) { updates.push('location = ?'); values.push(location); }
@@ -317,6 +327,7 @@ router.put('/tickets/:id', (req, res) => {
     db.prepare(`UPDATE tickets SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
     const updated = db.prepare('SELECT * FROM tickets WHERE id = ?').get(req.params.id);
+    updated.images = JSON.parse(updated.images || '[]');
     res.json({ message: 'Ticket updated.', ticket: updated });
   } catch (err) {
     console.error('Admin update ticket error:', err);
@@ -352,7 +363,8 @@ router.get('/packages', (req, res) => {
     const packages = db.prepare('SELECT * FROM packages ORDER BY id DESC').all();
     const result = packages.map(p => ({
       ...p,
-      includes: JSON.parse(p.includes || '[]')
+      includes: JSON.parse(p.includes || '[]'),
+      images: JSON.parse(p.images || '[]')
     }));
     res.json({ packages: result });
   } catch (err) {
@@ -365,18 +377,18 @@ router.get('/packages', (req, res) => {
 router.post('/packages', (req, res) => {
   try {
     const db = getDb();
-    const { name_en, name_cn, description_en, description_cn, image_url, base_price, includes, duration, status, items } = req.body;
+    const { name_en, name_cn, description_en, description_cn, image_url, images, base_price, includes, duration, status, items } = req.body;
 
     if (!name_en || base_price === undefined) {
       return res.status(400).json({ error: 'name_en and base_price are required.' });
     }
 
     const result = db.prepare(`
-      INSERT INTO packages (name_en, name_cn, description_en, description_cn, image_url, base_price, includes, duration, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO packages (name_en, name_cn, description_en, description_cn, image_url, images, base_price, includes, duration, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       name_en, name_cn || null, description_en || null, description_cn || null,
-      image_url || null, base_price, JSON.stringify(includes || []),
+      image_url || null, JSON.stringify(images || []), base_price, JSON.stringify(includes || []),
       duration || null, status || 'active'
     );
 
@@ -392,6 +404,7 @@ router.post('/packages', (req, res) => {
 
     const pkg = db.prepare('SELECT * FROM packages WHERE id = ?').get(packageId);
     pkg.includes = JSON.parse(pkg.includes || '[]');
+    pkg.images = JSON.parse(pkg.images || '[]');
     const packageItems = db.prepare('SELECT * FROM package_items WHERE package_id = ?').all(packageId);
 
     res.status(201).json({ message: 'Package created.', package: pkg, items: packageItems });
@@ -410,7 +423,7 @@ router.put('/packages/:id', (req, res) => {
       return res.status(404).json({ error: 'Package not found.' });
     }
 
-    const { name_en, name_cn, description_en, description_cn, image_url, base_price, includes, duration, status, items } = req.body;
+    const { name_en, name_cn, description_en, description_cn, image_url, images, base_price, includes, duration, status, items } = req.body;
 
     const updates = [];
     const values = [];
@@ -420,6 +433,7 @@ router.put('/packages/:id', (req, res) => {
     if (description_en !== undefined) { updates.push('description_en = ?'); values.push(description_en); }
     if (description_cn !== undefined) { updates.push('description_cn = ?'); values.push(description_cn); }
     if (image_url !== undefined) { updates.push('image_url = ?'); values.push(image_url); }
+    if (images !== undefined) { updates.push('images = ?'); values.push(JSON.stringify(images)); }
     if (base_price !== undefined) { updates.push('base_price = ?'); values.push(base_price); }
     if (includes !== undefined) { updates.push('includes = ?'); values.push(JSON.stringify(includes)); }
     if (duration !== undefined) { updates.push('duration = ?'); values.push(duration); }
@@ -441,6 +455,7 @@ router.put('/packages/:id', (req, res) => {
 
     const updated = db.prepare('SELECT * FROM packages WHERE id = ?').get(req.params.id);
     updated.includes = JSON.parse(updated.includes || '[]');
+    updated.images = JSON.parse(updated.images || '[]');
     const packageItems = db.prepare('SELECT * FROM package_items WHERE package_id = ?').all(req.params.id);
 
     res.json({ message: 'Package updated.', package: updated, items: packageItems });
@@ -470,6 +485,57 @@ router.delete('/packages/:id', (req, res) => {
 // ============================================================
 // INVENTORY MANAGEMENT
 // ============================================================
+
+// GET /room-inventory/:room_type_id - get room inventory
+router.get('/room-inventory/:room_type_id', (req, res) => {
+  try {
+    const db = getDb();
+    const { from_date, to_date } = req.query;
+    let query = 'SELECT * FROM room_inventory WHERE room_type_id = ?';
+    const params = [req.params.room_type_id];
+    if (from_date) { query += ' AND date >= ?'; params.push(from_date); }
+    if (to_date) { query += ' AND date <= ?'; params.push(to_date); }
+    query += ' ORDER BY date ASC';
+    const inventory = db.prepare(query).all(...params);
+    res.json({ inventory });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /ticket-inventory/:ticket_id - get ticket inventory
+router.get('/ticket-inventory/:ticket_id', (req, res) => {
+  try {
+    const db = getDb();
+    const { from_date, to_date } = req.query;
+    let query = 'SELECT * FROM ticket_inventory WHERE ticket_id = ?';
+    const params = [req.params.ticket_id];
+    if (from_date) { query += ' AND date >= ?'; params.push(from_date); }
+    if (to_date) { query += ' AND date <= ?'; params.push(to_date); }
+    query += ' ORDER BY date ASC';
+    const inventory = db.prepare(query).all(...params);
+    res.json({ inventory });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /package-inventory/:package_id - get package inventory
+router.get('/package-inventory/:package_id', (req, res) => {
+  try {
+    const db = getDb();
+    const { from_date, to_date } = req.query;
+    let query = 'SELECT * FROM package_inventory WHERE package_id = ?';
+    const params = [req.params.package_id];
+    if (from_date) { query += ' AND date >= ?'; params.push(from_date); }
+    if (to_date) { query += ' AND date <= ?'; params.push(to_date); }
+    query += ' ORDER BY date ASC';
+    const inventory = db.prepare(query).all(...params);
+    res.json({ inventory });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
 
 // PUT /room-inventory - bulk update room inventory
 router.put('/room-inventory', (req, res) => {
@@ -581,6 +647,139 @@ router.put('/package-inventory', (req, res) => {
     res.json({ message: `Package inventory updated for ${items.length} dates.` });
   } catch (err) {
     console.error('Admin update package inventory error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /room-inventory/bulk - bulk set room inventory by date range
+router.post('/room-inventory/bulk', (req, res) => {
+  try {
+    const db = getDb();
+    const { room_type_id, start_date, end_date, total_rooms, price, days_of_week } = req.body;
+    // days_of_week is optional array of 0-6 (0=Sunday). If not provided, apply to all days.
+
+    if (!room_type_id || !start_date || !end_date) {
+      return res.status(400).json({ error: 'room_type_id, start_date, and end_date are required.' });
+    }
+
+    const upsert = db.prepare(`
+      INSERT INTO room_inventory (room_type_id, date, total_rooms, price)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(room_type_id, date) DO UPDATE SET
+        total_rooms = CASE WHEN ? IS NOT NULL THEN ? ELSE room_inventory.total_rooms END,
+        price = CASE WHEN ? IS NOT NULL THEN ? ELSE room_inventory.price END
+    `);
+
+    let count = 0;
+    const current = new Date(start_date);
+    const end = new Date(end_date);
+
+    const transaction = db.transaction(() => {
+      while (current <= end) {
+        const dayOfWeek = current.getDay();
+        if (!days_of_week || days_of_week.length === 0 || days_of_week.includes(dayOfWeek)) {
+          const dateStr = current.toISOString().split('T')[0];
+          const t = total_rooms !== undefined && total_rooms !== null ? total_rooms : null;
+          const p = price !== undefined && price !== null ? price : null;
+          upsert.run(room_type_id, dateStr, t || 0, p, t, t, p, p);
+          count++;
+        }
+        current.setDate(current.getDate() + 1);
+      }
+    });
+    transaction();
+
+    res.json({ message: `Room inventory updated for ${count} dates.` });
+  } catch (err) {
+    console.error('Bulk room inventory error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /ticket-inventory/bulk - bulk set ticket inventory by date range
+router.post('/ticket-inventory/bulk', (req, res) => {
+  try {
+    const db = getDb();
+    const { ticket_id, start_date, end_date, total_quantity, price, days_of_week } = req.body;
+
+    if (!ticket_id || !start_date || !end_date) {
+      return res.status(400).json({ error: 'ticket_id, start_date, and end_date are required.' });
+    }
+
+    const upsert = db.prepare(`
+      INSERT INTO ticket_inventory (ticket_id, date, total_quantity, price)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(ticket_id, date) DO UPDATE SET
+        total_quantity = CASE WHEN ? IS NOT NULL THEN ? ELSE ticket_inventory.total_quantity END,
+        price = CASE WHEN ? IS NOT NULL THEN ? ELSE ticket_inventory.price END
+    `);
+
+    let count = 0;
+    const current = new Date(start_date);
+    const end = new Date(end_date);
+
+    const transaction = db.transaction(() => {
+      while (current <= end) {
+        const dayOfWeek = current.getDay();
+        if (!days_of_week || days_of_week.length === 0 || days_of_week.includes(dayOfWeek)) {
+          const dateStr = current.toISOString().split('T')[0];
+          const t = total_quantity !== undefined && total_quantity !== null ? total_quantity : null;
+          const p = price !== undefined && price !== null ? price : null;
+          upsert.run(ticket_id, dateStr, t || 0, p, t, t, p, p);
+          count++;
+        }
+        current.setDate(current.getDate() + 1);
+      }
+    });
+    transaction();
+
+    res.json({ message: `Ticket inventory updated for ${count} dates.` });
+  } catch (err) {
+    console.error('Bulk ticket inventory error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /package-inventory/bulk - bulk set package inventory by date range
+router.post('/package-inventory/bulk', (req, res) => {
+  try {
+    const db = getDb();
+    const { package_id, start_date, end_date, total_quantity, price, days_of_week } = req.body;
+
+    if (!package_id || !start_date || !end_date) {
+      return res.status(400).json({ error: 'package_id, start_date, and end_date are required.' });
+    }
+
+    const upsert = db.prepare(`
+      INSERT INTO package_inventory (package_id, date, total_quantity, price)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(package_id, date) DO UPDATE SET
+        total_quantity = CASE WHEN ? IS NOT NULL THEN ? ELSE package_inventory.total_quantity END,
+        price = CASE WHEN ? IS NOT NULL THEN ? ELSE package_inventory.price END
+    `);
+
+    let count = 0;
+    const current = new Date(start_date);
+    const end = new Date(end_date);
+
+    const transaction = db.transaction(() => {
+      while (current <= end) {
+        const dayOfWeek = current.getDay();
+        if (!days_of_week || days_of_week.length === 0 || days_of_week.includes(dayOfWeek)) {
+          const dateStr = current.toISOString().split('T')[0];
+          const t = total_quantity !== undefined && total_quantity !== null ? total_quantity : null;
+          const p = price !== undefined && price !== null ? price : null;
+          upsert.run(package_id, dateStr, t || 0, p, t, t, p, p);
+          count++;
+        }
+        current.setDate(current.getDate() + 1);
+      }
+    });
+    transaction();
+
+    res.json({ message: `Package inventory updated for ${count} dates.` });
+  } catch (err) {
+    console.error('Bulk package inventory error:', err);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
