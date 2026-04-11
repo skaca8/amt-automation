@@ -10,6 +10,7 @@ import PromotionManager from '../components/PromotionManager'
 const emptyHotel = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
   address: '', amenities: '', status: 'active', images: [],
+  is_featured: 0, sort_order: 0,
 }
 
 const emptyRoom = {
@@ -71,6 +72,28 @@ export default function HotelManagement() {
     }
   }
 
+  const toggleFeatured = async (hotel) => {
+    const hid = hotel._id || hotel.id
+    const newVal = hotel.is_featured ? 0 : 1
+    setHotels(prev => prev.map(h => (h._id || h.id) === hid ? { ...h, is_featured: newVal } : h))
+    try {
+      await put('/admin/products/featured', { product_type: 'hotel', product_id: hid, is_featured: newVal })
+    } catch {
+      setHotels(prev => prev.map(h => (h._id || h.id) === hid ? { ...h, is_featured: hotel.is_featured } : h))
+    }
+  }
+
+  const updateSortOrder = async (hotel, newOrder) => {
+    const hid = hotel._id || hotel.id
+    const val = Number(newOrder) || 0
+    setHotels(prev => prev.map(h => (h._id || h.id) === hid ? { ...h, sort_order: val } : h))
+    try {
+      await put('/admin/products/featured', { product_type: 'hotel', product_id: hid, sort_order: val })
+    } catch {
+      // revert silently
+    }
+  }
+
   const toggleExpand = (hotelId) => {
     if (expandedHotel === hotelId) {
       setExpandedHotel(null)
@@ -99,6 +122,8 @@ export default function HotelManagement() {
       amenities: Array.isArray(hotel.amenities) ? hotel.amenities.join(', ') : (hotel.amenities || ''),
       status: hotel.status || 'active',
       images: hotel.images || [],
+      is_featured: hotel.is_featured || 0,
+      sort_order: hotel.sort_order || 0,
     })
     setShowHotelModal(true)
   }

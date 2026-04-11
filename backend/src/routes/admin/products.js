@@ -7,6 +7,38 @@ const router = express.Router();
 // All routes require admin authentication
 router.use(authenticate, requireAdmin);
 
+// PUT /featured - quick toggle featured status
+router.put('/featured', (req, res) => {
+  try {
+    const db = getDb();
+    const { product_type, product_id, is_featured, sort_order } = req.body;
+
+    if (!product_type || !product_id) {
+      return res.status(400).json({ error: 'product_type and product_id are required.' });
+    }
+
+    const table = product_type === 'hotel' ? 'hotels' : product_type === 'ticket' ? 'tickets' : 'packages';
+
+    const updates = [];
+    const values = [];
+
+    if (is_featured !== undefined) { updates.push('is_featured = ?'); values.push(is_featured ? 1 : 0); }
+    if (sort_order !== undefined) { updates.push('sort_order = ?'); values.push(sort_order); }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update.' });
+    }
+
+    values.push(product_id);
+    db.prepare(`UPDATE ${table} SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+
+    res.json({ message: 'Featured status updated.' });
+  } catch (err) {
+    console.error('Update featured error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // ============================================================
 // HOTELS CRUD
 // ============================================================
@@ -32,19 +64,20 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   try {
     const db = getDb();
-    const { name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, images, status } = req.body;
+    const { name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, images, status, is_featured, sort_order } = req.body;
 
     if (!name_en) {
       return res.status(400).json({ error: 'name_en is required.' });
     }
 
     const result = db.prepare(`
-      INSERT INTO hotels (name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, images, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO hotels (name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, images, status, is_featured, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       name_en, name_cn || null, description_en || null, description_cn || null,
       address || null, image_url || null, rating || 0,
-      JSON.stringify(amenities || []), JSON.stringify(images || []), status || 'active'
+      JSON.stringify(amenities || []), JSON.stringify(images || []), status || 'active',
+      is_featured ? 1 : 0, sort_order || 0
     );
 
     const hotel = db.prepare('SELECT * FROM hotels WHERE id = ?').get(result.lastInsertRowid);
@@ -67,7 +100,7 @@ router.put('/:id', (req, res) => {
       return res.status(404).json({ error: 'Hotel not found.' });
     }
 
-    const { name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, images, status } = req.body;
+    const { name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, images, status, is_featured, sort_order } = req.body;
 
     const updates = [];
     const values = [];
@@ -82,6 +115,8 @@ router.put('/:id', (req, res) => {
     if (amenities !== undefined) { updates.push('amenities = ?'); values.push(JSON.stringify(amenities)); }
     if (images !== undefined) { updates.push('images = ?'); values.push(JSON.stringify(images)); }
     if (status !== undefined) { updates.push('status = ?'); values.push(status); }
+    if (is_featured !== undefined) { updates.push('is_featured = ?'); values.push(is_featured ? 1 : 0); }
+    if (sort_order !== undefined) { updates.push('sort_order = ?'); values.push(sort_order); }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update.' });
@@ -269,19 +304,20 @@ router.get('/tickets', (req, res) => {
 router.post('/tickets', (req, res) => {
   try {
     const db = getDb();
-    const { name_en, name_cn, description_en, description_cn, category, image_url, images, base_price, duration, location, status } = req.body;
+    const { name_en, name_cn, description_en, description_cn, category, image_url, images, base_price, duration, location, status, is_featured, sort_order } = req.body;
 
     if (!name_en || base_price === undefined) {
       return res.status(400).json({ error: 'name_en and base_price are required.' });
     }
 
     const result = db.prepare(`
-      INSERT INTO tickets (name_en, name_cn, description_en, description_cn, category, image_url, images, base_price, duration, location, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tickets (name_en, name_cn, description_en, description_cn, category, image_url, images, base_price, duration, location, status, is_featured, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       name_en, name_cn || null, description_en || null, description_cn || null,
       category || null, image_url || null, JSON.stringify(images || []), base_price,
-      duration || null, location || null, status || 'active'
+      duration || null, location || null, status || 'active',
+      is_featured ? 1 : 0, sort_order || 0
     );
 
     const ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(result.lastInsertRowid);
@@ -302,7 +338,7 @@ router.put('/tickets/:id', (req, res) => {
       return res.status(404).json({ error: 'Ticket not found.' });
     }
 
-    const { name_en, name_cn, description_en, description_cn, category, image_url, images, base_price, duration, location, status } = req.body;
+    const { name_en, name_cn, description_en, description_cn, category, image_url, images, base_price, duration, location, status, is_featured, sort_order } = req.body;
 
     const updates = [];
     const values = [];
@@ -318,6 +354,8 @@ router.put('/tickets/:id', (req, res) => {
     if (duration !== undefined) { updates.push('duration = ?'); values.push(duration); }
     if (location !== undefined) { updates.push('location = ?'); values.push(location); }
     if (status !== undefined) { updates.push('status = ?'); values.push(status); }
+    if (is_featured !== undefined) { updates.push('is_featured = ?'); values.push(is_featured ? 1 : 0); }
+    if (sort_order !== undefined) { updates.push('sort_order = ?'); values.push(sort_order); }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update.' });
@@ -377,19 +415,20 @@ router.get('/packages', (req, res) => {
 router.post('/packages', (req, res) => {
   try {
     const db = getDb();
-    const { name_en, name_cn, description_en, description_cn, image_url, images, base_price, includes, duration, status, items } = req.body;
+    const { name_en, name_cn, description_en, description_cn, image_url, images, base_price, includes, duration, status, items, is_featured, sort_order } = req.body;
 
     if (!name_en || base_price === undefined) {
       return res.status(400).json({ error: 'name_en and base_price are required.' });
     }
 
     const result = db.prepare(`
-      INSERT INTO packages (name_en, name_cn, description_en, description_cn, image_url, images, base_price, includes, duration, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO packages (name_en, name_cn, description_en, description_cn, image_url, images, base_price, includes, duration, status, is_featured, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       name_en, name_cn || null, description_en || null, description_cn || null,
       image_url || null, JSON.stringify(images || []), base_price, JSON.stringify(includes || []),
-      duration || null, status || 'active'
+      duration || null, status || 'active',
+      is_featured ? 1 : 0, sort_order || 0
     );
 
     const packageId = result.lastInsertRowid;
@@ -423,7 +462,7 @@ router.put('/packages/:id', (req, res) => {
       return res.status(404).json({ error: 'Package not found.' });
     }
 
-    const { name_en, name_cn, description_en, description_cn, image_url, images, base_price, includes, duration, status, items } = req.body;
+    const { name_en, name_cn, description_en, description_cn, image_url, images, base_price, includes, duration, status, items, is_featured, sort_order } = req.body;
 
     const updates = [];
     const values = [];
@@ -438,6 +477,8 @@ router.put('/packages/:id', (req, res) => {
     if (includes !== undefined) { updates.push('includes = ?'); values.push(JSON.stringify(includes)); }
     if (duration !== undefined) { updates.push('duration = ?'); values.push(duration); }
     if (status !== undefined) { updates.push('status = ?'); values.push(status); }
+    if (is_featured !== undefined) { updates.push('is_featured = ?'); values.push(is_featured ? 1 : 0); }
+    if (sort_order !== undefined) { updates.push('sort_order = ?'); values.push(sort_order); }
 
     if (updates.length > 0) {
       values.push(req.params.id);

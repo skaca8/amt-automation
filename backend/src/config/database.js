@@ -292,6 +292,13 @@ function initTables(db) {
     "ALTER TABLE tickets ADD COLUMN images TEXT DEFAULT '[]'",
     "ALTER TABLE packages ADD COLUMN images TEXT DEFAULT '[]'",
     "ALTER TABLE promotions ADD COLUMN blackout_dates TEXT DEFAULT '[]'",
+    "ALTER TABLE hotels ADD COLUMN is_featured INTEGER DEFAULT 0",
+    "ALTER TABLE hotels ADD COLUMN sort_order INTEGER DEFAULT 0",
+    "ALTER TABLE room_types ADD COLUMN sort_order INTEGER DEFAULT 0",
+    "ALTER TABLE tickets ADD COLUMN is_featured INTEGER DEFAULT 0",
+    "ALTER TABLE tickets ADD COLUMN sort_order INTEGER DEFAULT 0",
+    "ALTER TABLE packages ADD COLUMN is_featured INTEGER DEFAULT 0",
+    "ALTER TABLE packages ADD COLUMN sort_order INTEGER DEFAULT 0",
   ];
   for (const sql of alterStatements) {
     try { db.exec(sql); } catch (e) { /* column already exists */ }

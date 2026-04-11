@@ -23,7 +23,7 @@ router.get('/', (req, res) => {
       params.push(term, term, term);
     }
 
-    query += ' ORDER BY id ASC';
+    query += ' ORDER BY is_featured DESC, sort_order ASC, id DESC';
 
     const tickets = db.prepare(query).all(...params);
 

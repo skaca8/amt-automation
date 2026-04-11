@@ -18,7 +18,7 @@ router.get('/', (req, res) => {
       params.push(term, term, term);
     }
 
-    query += ' ORDER BY rating DESC, id ASC';
+    query += ' ORDER BY is_featured DESC, sort_order ASC, rating DESC, id ASC';
 
     const hotels = db.prepare(query).all(...params);
 
