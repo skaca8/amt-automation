@@ -131,6 +131,10 @@ export default function SearchBar() {
   const handleSearch = (e) => {
     e.preventDefault()
     if (activeTab === 'hotels') {
+      if (hotelSearch.checkIn && hotelSearch.checkOut && hotelSearch.checkOut <= hotelSearch.checkIn) {
+        alert('Check-out date must be after check-in date.')
+        return
+      }
       const params = new URLSearchParams()
       if (hotelSearch.checkIn) params.set('checkIn', hotelSearch.checkIn)
       if (hotelSearch.checkOut) params.set('checkOut', hotelSearch.checkOut)
@@ -173,9 +177,18 @@ export default function SearchBar() {
               <label style={styles.label}>{t('hotel.checkIn')}</label>
               <input
                 type="date"
+                lang="en"
                 style={styles.input}
                 value={hotelSearch.checkIn}
-                onChange={e => setHotelSearch(s => ({ ...s, checkIn: e.target.value }))}
+                min={new Date().toISOString().split('T')[0]}
+                onChange={e => {
+                  const val = e.target.value
+                  setHotelSearch(s => ({
+                    ...s,
+                    checkIn: val,
+                    checkOut: s.checkOut && s.checkOut <= val ? '' : s.checkOut
+                  }))
+                }}
                 onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
                 onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
               />
@@ -184,8 +197,10 @@ export default function SearchBar() {
               <label style={styles.label}>{t('hotel.checkOut')}</label>
               <input
                 type="date"
+                lang="en"
                 style={styles.input}
                 value={hotelSearch.checkOut}
+                min={hotelSearch.checkIn || new Date().toISOString().split('T')[0]}
                 onChange={e => setHotelSearch(s => ({ ...s, checkOut: e.target.value }))}
                 onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
                 onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
@@ -234,7 +249,9 @@ export default function SearchBar() {
               <label style={styles.label}>{t('ticket.selectDate')}</label>
               <input
                 type="date"
+                lang="en"
                 style={styles.input}
+                min={new Date().toISOString().split('T')[0]}
                 value={ticketSearch.date}
                 onChange={e => setTicketSearch(s => ({ ...s, date: e.target.value }))}
                 onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
@@ -258,7 +275,9 @@ export default function SearchBar() {
               <label style={styles.label}>{t('package.startDate')}</label>
               <input
                 type="date"
+                lang="en"
                 style={styles.input}
+                min={new Date().toISOString().split('T')[0]}
                 value={packageSearch.date}
                 onChange={e => setPackageSearch(s => ({ ...s, date: e.target.value }))}
                 onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}

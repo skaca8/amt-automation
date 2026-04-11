@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { get } from '../utils/api'
+import DateRangePicker from '../components/DateRangePicker'
 
 const styles = {
   page: {
@@ -288,7 +289,7 @@ export default function HotelDetail() {
     if (!checkIn || !checkOut) return
     setCheckingAvail(true)
     try {
-      const data = await get(`/hotels/${id}/availability?checkIn=${checkIn}&checkOut=${checkOut}`)
+      const data = await get(`/hotels/${id}/availability?check_in=${checkIn}&check_out=${checkOut}`)
       setAvailability(data)
     } catch (err) {
       console.error('Availability check failed:', err)
@@ -403,25 +404,12 @@ export default function HotelDetail() {
           <div style={styles.dateCard}>
             <h3 style={styles.dateCardTitle}>{t('hotel.availability')}</h3>
             <div style={styles.dateGroup}>
-              <label style={styles.dateLabel}>{t('hotel.checkIn')}</label>
-              <input
-                type="date"
-                style={styles.dateInput}
-                value={checkIn}
-                onChange={e => setCheckIn(e.target.value)}
-                onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
-                onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
-              />
-            </div>
-            <div style={styles.dateGroup}>
-              <label style={styles.dateLabel}>{t('hotel.checkOut')}</label>
-              <input
-                type="date"
-                style={styles.dateInput}
-                value={checkOut}
-                onChange={e => setCheckOut(e.target.value)}
-                onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
-                onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
+              <label style={styles.dateLabel}>Check-in / Check-out</label>
+              <DateRangePicker
+                checkIn={checkIn}
+                checkOut={checkOut}
+                onChange={(ci, co) => { setCheckIn(ci); setCheckOut(co) }}
+                placeholder="Select check-in & check-out"
               />
             </div>
             <button

@@ -337,8 +337,10 @@ export default function TicketDetail() {
             <label style={styles.label}>{t('ticket.visitDate')}</label>
             <input
               type="date"
+              lang="en"
               style={styles.input}
               value={visitDate}
+              min={new Date().toISOString().split('T')[0]}
               onChange={e => setVisitDate(e.target.value)}
               onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
               onBlur={e => { e.target.style.borderColor = 'var(--border)' }}

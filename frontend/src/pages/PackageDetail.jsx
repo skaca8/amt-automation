@@ -315,8 +315,10 @@ export default function PackageDetail() {
             <label style={styles.label}>{t('package.startDate')}</label>
             <input
               type="date"
+              lang="en"
               style={styles.input}
               value={startDate}
+              min={new Date().toISOString().split('T')[0]}
               onChange={e => setStartDate(e.target.value)}
               onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
               onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
