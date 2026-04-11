@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import DateRangePicker from './DateRangePicker'
+import SingleDatePicker from './SingleDatePicker'
 
 const styles = {
   wrapper: {
@@ -226,15 +227,10 @@ export default function SearchBar() {
             </div>
             <div style={styles.field}>
               <label style={styles.label}>{t('ticket.selectDate')}</label>
-              <input
-                type="date"
-                lang="en"
-                style={styles.input}
-                min={new Date().toISOString().split('T')[0]}
+              <SingleDatePicker
                 value={ticketSearch.date}
-                onChange={e => setTicketSearch(s => ({ ...s, date: e.target.value }))}
-                onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
-                onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
+                onChange={(d) => setTicketSearch(s => ({ ...s, date: d }))}
+                placeholder="Select date"
               />
             </div>
             <button
@@ -252,15 +248,10 @@ export default function SearchBar() {
           <div style={styles.row} className="search-row">
             <div style={styles.field}>
               <label style={styles.label}>{t('package.startDate')}</label>
-              <input
-                type="date"
-                lang="en"
-                style={styles.input}
-                min={new Date().toISOString().split('T')[0]}
+              <SingleDatePicker
                 value={packageSearch.date}
-                onChange={e => setPackageSearch(s => ({ ...s, date: e.target.value }))}
-                onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
-                onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
+                onChange={(d) => setPackageSearch(s => ({ ...s, date: d }))}
+                placeholder="Select date"
               />
             </div>
             <button
