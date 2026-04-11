@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { get } from '../utils/api'
+import SingleDatePicker from '../components/SingleDatePicker'
 
 const styles = {
   page: {
@@ -183,6 +184,7 @@ export default function PackageDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [startDate, setStartDate] = useState('')
+  const [quantity, setQuantity] = useState(1)
   const [heroIdx, setHeroIdx] = useState(0)
 
   useEffect(() => {
@@ -203,6 +205,7 @@ export default function PackageDetail() {
   const handleBook = () => {
     const params = new URLSearchParams()
     if (startDate) params.set('date', startDate)
+    params.set('quantity', quantity.toString())
     navigate(`/booking/package/${id}?${params.toString()}`)
   }
 
@@ -308,21 +311,64 @@ export default function PackageDetail() {
               <span style={styles.priceCurrency}>{t('common.currency')}</span>
               {price.toLocaleString()}
             </span>
-            <span style={styles.priceUnit}>/ {t('package.details')}</span>
+            <span style={styles.priceUnit}>/ person</span>
           </div>
 
           <div style={styles.formGroup}>
             <label style={styles.label}>{t('package.startDate')}</label>
-            <input
-              type="date"
-              lang="en"
-              style={styles.input}
+            <SingleDatePicker
               value={startDate}
-              min={new Date().toISOString().split('T')[0]}
-              onChange={e => setStartDate(e.target.value)}
-              onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
-              onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
+              onChange={setStartDate}
+              placeholder="Select start date"
             />
+          </div>
+
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Number of Persons</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                style={{
+                  width: 36, height: 36, borderRadius: '50%',
+                  border: '1.5px solid #e2e8f0', background: '#fff',
+                  fontSize: '1.2rem', cursor: 'pointer', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit',
+                }}
+              >-</button>
+              <span style={{ fontSize: '1.2rem', fontWeight: 700, minWidth: 30, textAlign: 'center' }}>
+                {quantity}
+              </span>
+              <button
+                type="button"
+                onClick={() => setQuantity(q => Math.min(20, q + 1))}
+                style={{
+                  width: 36, height: 36, borderRadius: '50%',
+                  border: '1.5px solid #e2e8f0', background: '#fff',
+                  fontSize: '1.2rem', cursor: 'pointer', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit',
+                }}
+              >+</button>
+            </div>
+          </div>
+
+          <div style={{
+            background: '#f8fafc', borderRadius: 12, padding: 20,
+            border: '1px solid #e2e8f0', marginTop: 16
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem', color: '#475569' }}>
+              <span>Unit Price</span>
+              <span>{'\u20A9'}{price.toLocaleString()} / person</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem', color: '#475569' }}>
+              <span>Quantity</span>
+              <span>{'\u00D7'} {quantity}</span>
+            </div>
+            <div style={{ borderTop: '2px solid #e2e8f0', paddingTop: 12, marginTop: 8,
+              display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem', fontWeight: 700, color: '#1e293b' }}>
+              <span>Total</span>
+              <span style={{ color: '#1a73e8' }}>{'\u20A9'}{(price * quantity).toLocaleString()}</span>
+            </div>
           </div>
 
           <button

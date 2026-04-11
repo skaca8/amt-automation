@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { get } from '../utils/api'
+import SingleDatePicker from '../components/SingleDatePicker'
 
 const styles = {
   page: {
@@ -335,15 +336,10 @@ export default function TicketDetail() {
 
           <div style={styles.formGroup}>
             <label style={styles.label}>{t('ticket.visitDate')}</label>
-            <input
-              type="date"
-              lang="en"
-              style={styles.input}
+            <SingleDatePicker
               value={visitDate}
-              min={new Date().toISOString().split('T')[0]}
-              onChange={e => setVisitDate(e.target.value)}
-              onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
-              onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
+              onChange={setVisitDate}
+              placeholder="Select visit date"
             />
           </div>
 
@@ -366,9 +362,23 @@ export default function TicketDetail() {
             </div>
           </div>
 
-          <div style={styles.totalRow}>
-            <span style={styles.totalLabel}>{t('booking.total')}</span>
-            <span style={styles.totalAmount}>{t('common.currency')} {total.toLocaleString()}</span>
+          <div style={{
+            background: '#f8fafc', borderRadius: 12, padding: 20,
+            border: '1px solid #e2e8f0', marginTop: 16, marginBottom: 20
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem', color: '#475569' }}>
+              <span>Unit Price</span>
+              <span>{'\u20A9'}{price.toLocaleString()} / person</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem', color: '#475569' }}>
+              <span>Quantity</span>
+              <span>{'\u00D7'} {quantity}</span>
+            </div>
+            <div style={{ borderTop: '2px solid #e2e8f0', paddingTop: 12, marginTop: 8,
+              display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem', fontWeight: 700, color: '#1e293b' }}>
+              <span>Total</span>
+              <span style={{ color: '#1a73e8' }}>{'\u20A9'}{total.toLocaleString()}</span>
+            </div>
           </div>
 
           <button

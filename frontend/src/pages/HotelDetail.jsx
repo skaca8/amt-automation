@@ -483,9 +483,27 @@ export default function HotelDetail() {
                       </div>
                       <div style={styles.roomPriceCol}>
                         <div style={styles.roomPrice}>
-                          {t('common.currency')} {(room.price || room.basePrice || room.base_price || 0).toLocaleString()}
+                          {'\u20A9'}{(room.price || room.basePrice || room.base_price || 0).toLocaleString()}
                         </div>
-                        <div style={styles.roomPriceUnit}>/ {t('common.night')}</div>
+                        <div style={styles.roomPriceUnit}>/ room / night</div>
+                        {checkIn && checkOut && (() => {
+                          const roomPrice = room.price || room.basePrice || room.base_price || 0
+                          const nights = Math.max(1, Math.ceil((new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24)))
+                          const roomTotal = roomPrice * nights
+                          return (
+                            <div style={{
+                              background: '#f8fafc', borderRadius: 8, padding: 10,
+                              border: '1px solid #e2e8f0', marginBottom: 10, textAlign: 'left'
+                            }}>
+                              <div style={{ fontSize: '0.8rem', color: '#475569', marginBottom: 4 }}>
+                                {nights} night{nights > 1 ? 's' : ''} {'\u00D7'} {'\u20A9'}{roomPrice.toLocaleString()}
+                              </div>
+                              <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1a73e8' }}>
+                                Total: {'\u20A9'}{roomTotal.toLocaleString()}
+                              </div>
+                            </div>
+                          )
+                        })()}
                         <button
                           style={{
                             ...styles.bookRoomBtn,

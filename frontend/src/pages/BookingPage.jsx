@@ -301,6 +301,10 @@ export default function BookingPage() {
       return (product.price || product.basePrice || 0) * quantity
     }
 
+    if (type === 'package') {
+      return (product.price || product.basePrice || 0) * quantity
+    }
+
     return product.price || product.basePrice || 0
   }
 
@@ -348,6 +352,7 @@ export default function BookingPage() {
         bookingData.quantity = quantity
       } else if (type === 'package') {
         bookingData.startDate = visitDate
+        bookingData.quantity = quantity
       }
 
       const result = await post('/bookings', bookingData)
@@ -519,17 +524,63 @@ export default function BookingPage() {
             )}
 
             {type === 'package' && (
-              <div style={styles.summaryRow}>
-                <span style={styles.summaryLabel}>{t('package.startDate')}</span>
-                <span style={styles.summaryValue}>{visitDate || '-'}</span>
-              </div>
+              <>
+                <div style={styles.summaryRow}>
+                  <span style={styles.summaryLabel}>{t('package.startDate')}</span>
+                  <span style={styles.summaryValue}>{visitDate || '-'}</span>
+                </div>
+                <div style={styles.summaryRow}>
+                  <span style={styles.summaryLabel}>Quantity</span>
+                  <span style={styles.summaryValue}>{quantity} {quantity === 1 ? 'person' : 'persons'}</span>
+                </div>
+              </>
             )}
 
             <div style={styles.divider} />
 
+            {(type === 'ticket' || type === 'package') && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={styles.summaryRow}>
+                  <span style={styles.summaryLabel}>Unit Price</span>
+                  <span style={styles.summaryValue}>{'\u20A9'}{(product.price || product.basePrice || 0).toLocaleString()} / person</span>
+                </div>
+                {quantity > 1 && (
+                  <div style={styles.summaryRow}>
+                    <span style={styles.summaryLabel}>{'\u00D7'} {quantity} persons</span>
+                    <span style={styles.summaryValue}>{'\u20A9'}{total.toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {type === 'hotel' && checkIn && checkOut && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={styles.summaryRow}>
+                  <span style={styles.summaryLabel}>Room Rate</span>
+                  <span style={styles.summaryValue}>{'\u20A9'}{(() => {
+                    const roomTypes = product.roomTypes || []
+                    let roomPrice = 0
+                    if (roomTypeId) {
+                      const room = roomTypes.find(r => (r._id || r.id) === roomTypeId)
+                      roomPrice = room ? (room.price || room.basePrice || 0) : 0
+                    } else if (roomTypes.length > 0) {
+                      roomPrice = roomTypes[0].price || roomTypes[0].basePrice || 0
+                    } else {
+                      roomPrice = product.price || product.basePrice || 0
+                    }
+                    return roomPrice.toLocaleString()
+                  })()} / room / night</span>
+                </div>
+                <div style={styles.summaryRow}>
+                  <span style={styles.summaryLabel}>{getNights()} night{getNights() > 1 ? 's' : ''}</span>
+                  <span style={styles.summaryValue}>{'\u20A9'}{total.toLocaleString()}</span>
+                </div>
+              </div>
+            )}
+
             <div style={styles.totalRow}>
               <span style={styles.totalLabel}>{t('booking.grandTotal')}</span>
-              <span style={styles.totalAmount}>{t('common.currency')} {total.toLocaleString()}</span>
+              <span style={styles.totalAmount}>{'\u20A9'}{total.toLocaleString()}</span>
             </div>
 
             <div style={styles.paymentNote}>{t('booking.paymentNote')}</div>
