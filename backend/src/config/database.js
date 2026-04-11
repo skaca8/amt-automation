@@ -267,7 +267,34 @@ function initTables(db) {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS promotions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      discount_type TEXT NOT NULL DEFAULT 'percentage',
+      discount_value REAL NOT NULL DEFAULT 0,
+      product_type TEXT,
+      product_id INTEGER,
+      start_date TEXT,
+      end_date TEXT,
+      min_quantity INTEGER DEFAULT 1,
+      max_uses INTEGER,
+      current_uses INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
+
+  // Add images column to tables that need it
+  const alterStatements = [
+    "ALTER TABLE hotels ADD COLUMN images TEXT DEFAULT '[]'",
+    "ALTER TABLE room_types ADD COLUMN images TEXT DEFAULT '[]'",
+    "ALTER TABLE tickets ADD COLUMN images TEXT DEFAULT '[]'",
+    "ALTER TABLE packages ADD COLUMN images TEXT DEFAULT '[]'",
+  ];
+  for (const sql of alterStatements) {
+    try { db.exec(sql); } catch (e) { /* column already exists */ }
+  }
 }
 
 async function initDb() {

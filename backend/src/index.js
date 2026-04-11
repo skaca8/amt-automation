@@ -14,6 +14,8 @@ const adminBookingRoutes = require('./routes/admin/bookings');
 const adminUserRoutes = require('./routes/admin/users');
 const adminDashboardRoutes = require('./routes/admin/dashboard');
 const adminPaymentRoutes = require('./routes/admin/payments');
+const uploadRoutes = require('./routes/admin/upload');
+const promotionRoutes = require('./routes/admin/promotions');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -26,6 +28,14 @@ app.use(express.urlencoded({ extended: true }));
 async function start() {
   // Initialize database before mounting routes
   await initDb();
+
+  // Serve uploaded files statically
+  const fs = require('fs');
+  const uploadsDir = path.join(__dirname, '..', 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  app.use('/uploads', express.static(uploadsDir));
 
   // Health check
   app.get('/api/health', (req, res) => {
@@ -43,6 +53,8 @@ async function start() {
   app.use('/api/admin/users', adminUserRoutes);
   app.use('/api/admin/dashboard', adminDashboardRoutes);
   app.use('/api/admin/payments', adminPaymentRoutes);
+  app.use('/api/admin/upload', uploadRoutes);
+  app.use('/api/admin/promotions', promotionRoutes);
 
   // 404 handler
   app.use((req, res) => {
