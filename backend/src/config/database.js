@@ -291,6 +291,7 @@ function initTables(db) {
     "ALTER TABLE room_types ADD COLUMN images TEXT DEFAULT '[]'",
     "ALTER TABLE tickets ADD COLUMN images TEXT DEFAULT '[]'",
     "ALTER TABLE packages ADD COLUMN images TEXT DEFAULT '[]'",
+    "ALTER TABLE promotions ADD COLUMN blackout_dates TEXT DEFAULT '[]'",
   ];
   for (const sql of alterStatements) {
     try { db.exec(sql); } catch (e) { /* column already exists */ }

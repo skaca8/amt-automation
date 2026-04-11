@@ -5,6 +5,19 @@ const { authenticate, requireAdmin } = require('../../middleware/auth');
 const router = express.Router();
 router.use(authenticate, requireAdmin);
 
+function parseBlackoutDates(promo) {
+  if (promo && promo.blackout_dates) {
+    try {
+      promo.blackout_dates = JSON.parse(promo.blackout_dates);
+    } catch {
+      promo.blackout_dates = [];
+    }
+  } else if (promo) {
+    promo.blackout_dates = [];
+  }
+  return promo;
+}
+
 // GET /active - get currently active promotions
 router.get('/active', (req, res) => {
   try {
@@ -16,7 +29,7 @@ router.get('/active', (req, res) => {
         AND (start_date IS NULL OR start_date <= ?)
         AND (end_date IS NULL OR end_date >= ?)
       ORDER BY id DESC
-    `).all(today, today);
+    `).all(today, today).map(parseBlackoutDates);
     res.json({ promotions });
   } catch (err) {
     console.error('List active promotions error:', err);
@@ -44,7 +57,7 @@ router.get('/', (req, res) => {
 
     query += ' ORDER BY id DESC';
 
-    const promotions = db.prepare(query).all(...params);
+    const promotions = db.prepare(query).all(...params).map(parseBlackoutDates);
     res.json({ promotions });
   } catch (err) {
     console.error('List promotions error:', err);
@@ -58,7 +71,7 @@ router.post('/', (req, res) => {
     const db = getDb();
     const {
       name, discount_type, discount_value, product_type, product_id,
-      start_date, end_date, min_quantity, max_uses, status
+      start_date, end_date, min_quantity, max_uses, status, blackout_dates
     } = req.body;
 
     if (!name || discount_value === undefined) {
@@ -70,9 +83,13 @@ router.post('/', (req, res) => {
       return res.status(400).json({ error: 'discount_type must be "fixed" or "percentage".' });
     }
 
+    const blackoutStr = blackout_dates
+      ? (typeof blackout_dates === 'string' ? blackout_dates : JSON.stringify(blackout_dates))
+      : '[]';
+
     const result = db.prepare(`
-      INSERT INTO promotions (name, discount_type, discount_value, product_type, product_id, start_date, end_date, min_quantity, max_uses, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO promotions (name, discount_type, discount_value, product_type, product_id, start_date, end_date, min_quantity, max_uses, status, blackout_dates)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       name,
       discount_type || 'percentage',
@@ -83,10 +100,11 @@ router.post('/', (req, res) => {
       end_date || null,
       min_quantity || 1,
       max_uses || null,
-      status || 'active'
+      status || 'active',
+      blackoutStr
     );
 
-    const promotion = db.prepare('SELECT * FROM promotions WHERE id = ?').get(result.lastInsertRowid);
+    const promotion = parseBlackoutDates(db.prepare('SELECT * FROM promotions WHERE id = ?').get(result.lastInsertRowid));
     res.status(201).json({ message: 'Promotion created.', promotion });
   } catch (err) {
     console.error('Create promotion error:', err);
@@ -105,7 +123,7 @@ router.put('/:id', (req, res) => {
 
     const {
       name, discount_type, discount_value, product_type, product_id,
-      start_date, end_date, min_quantity, max_uses, current_uses, status
+      start_date, end_date, min_quantity, max_uses, current_uses, status, blackout_dates
     } = req.body;
 
     const updates = [];
@@ -128,6 +146,10 @@ router.put('/:id', (req, res) => {
     if (max_uses !== undefined) { updates.push('max_uses = ?'); values.push(max_uses); }
     if (current_uses !== undefined) { updates.push('current_uses = ?'); values.push(current_uses); }
     if (status !== undefined) { updates.push('status = ?'); values.push(status); }
+    if (blackout_dates !== undefined) {
+      const blackoutStr = typeof blackout_dates === 'string' ? blackout_dates : JSON.stringify(blackout_dates);
+      updates.push('blackout_dates = ?'); values.push(blackoutStr);
+    }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update.' });
@@ -136,7 +158,7 @@ router.put('/:id', (req, res) => {
     values.push(req.params.id);
     db.prepare(`UPDATE promotions SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-    const updated = db.prepare('SELECT * FROM promotions WHERE id = ?').get(req.params.id);
+    const updated = parseBlackoutDates(db.prepare('SELECT * FROM promotions WHERE id = ?').get(req.params.id));
     res.json({ message: 'Promotion updated.', promotion: updated });
   } catch (err) {
     console.error('Update promotion error:', err);
