@@ -36,7 +36,7 @@ export default function PackageManagement() {
     setLoading(true)
     setError('')
     try {
-      const res = await get('/admin/packages')
+      const res = await get('/admin/products/packages')
       setPackages(res.packages || res.data || res || [])
     } catch (err) {
       setError(err.message)
@@ -53,8 +53,8 @@ export default function PackageManagement() {
   const loadProductOptions = async () => {
     try {
       const [h, t] = await Promise.all([
-        get('/admin/hotels').catch(() => ({ hotels: [] })),
-        get('/admin/tickets').catch(() => ({ tickets: [] })),
+        get('/admin/products').catch(() => ({ hotels: [] })),
+        get('/admin/products/tickets').catch(() => ({ tickets: [] })),
       ])
       const hotelList = h.hotels || h.data || h || []
       setHotels(hotelList)
@@ -64,7 +64,7 @@ export default function PackageManagement() {
       for (const hotel of hotelList) {
         const hid = hotel._id || hotel.id
         try {
-          const roomRes = await get(`/admin/hotels/${hid}/rooms`)
+          const roomRes = await get(`/admin/products/room-types?hotel_id=${hid}`)
           roomMap[hid] = roomRes.rooms || roomRes.data || roomRes || []
         } catch {
           roomMap[hid] = []
@@ -100,11 +100,11 @@ export default function PackageManagement() {
   const savePackage = async () => {
     setSaving(true)
     try {
-      const payload = { ...form, price: Number(form.price) }
+      const payload = { ...form, base_price: Number(form.price) }
       if (editing) {
-        await put(`/admin/packages/${editing._id || editing.id}`, payload)
+        await put(`/admin/products/packages/${editing._id || editing.id}`, payload)
       } else {
-        await post('/admin/packages', payload)
+        await post('/admin/products/packages', payload)
       }
       setShowModal(false)
       loadPackages()
@@ -118,7 +118,7 @@ export default function PackageManagement() {
   const deletePackage = async (pkg) => {
     if (!window.confirm(`Delete "${pkg.name_en}"? This action cannot be undone.`)) return
     try {
-      await del(`/admin/packages/${pkg._id || pkg.id}`)
+      await del(`/admin/products/packages/${pkg._id || pkg.id}`)
       loadPackages()
     } catch (err) {
       alert('Delete failed: ' + err.message)

@@ -46,7 +46,7 @@ export default function HotelManagement() {
     setLoading(true)
     setError('')
     try {
-      const res = await get('/admin/hotels')
+      const res = await get('/admin/products')
       setHotels(res.hotels || res.data || res || [])
     } catch (err) {
       setError(err.message)
@@ -62,7 +62,7 @@ export default function HotelManagement() {
   const loadRoomTypes = async (hotelId) => {
     setLoadingRooms(true)
     try {
-      const res = await get(`/admin/hotels/${hotelId}/rooms`)
+      const res = await get(`/admin/products/room-types?hotel_id=${hotelId}`)
       setRoomTypes(res.rooms || res.data || res || [])
     } catch {
       setRoomTypes([])
@@ -113,9 +113,9 @@ export default function HotelManagement() {
           : hotelForm.amenities,
       }
       if (editingHotel) {
-        await put(`/admin/hotels/${editingHotel._id || editingHotel.id}`, payload)
+        await put(`/admin/products/${editingHotel._id || editingHotel.id}`, payload)
       } else {
-        await post('/admin/hotels', payload)
+        await post('/admin/products', payload)
       }
       setShowHotelModal(false)
       loadHotels()
@@ -129,7 +129,7 @@ export default function HotelManagement() {
   const deleteHotel = async (hotel) => {
     if (!window.confirm(`Delete "${hotel.name_en}"? This action cannot be undone.`)) return
     try {
-      await del(`/admin/hotels/${hotel._id || hotel.id}`)
+      await del(`/admin/products/${hotel._id || hotel.id}`)
       loadHotels()
     } catch (err) {
       alert('Delete failed: ' + err.message)
@@ -168,9 +168,9 @@ export default function HotelManagement() {
         base_price: Number(roomForm.base_price) || 0,
       }
       if (editingRoom) {
-        await put(`/admin/hotels/${expandedHotel}/rooms/${editingRoom._id || editingRoom.id}`, payload)
+        await put(`/admin/products/room-types/${editingRoom._id || editingRoom.id}`, payload)
       } else {
-        await post(`/admin/hotels/${expandedHotel}/rooms`, payload)
+        await post('/admin/products/room-types', { ...payload, hotel_id: expandedHotel })
       }
       setShowRoomModal(false)
       loadRoomTypes(expandedHotel)
@@ -184,7 +184,7 @@ export default function HotelManagement() {
   const deleteRoom = async (room) => {
     if (!window.confirm(`Delete room type "${room.name_en}"?`)) return
     try {
-      await del(`/admin/hotels/${expandedHotel}/rooms/${room._id || room.id}`)
+      await del(`/admin/products/room-types/${room._id || room.id}`)
       loadRoomTypes(expandedHotel)
     } catch (err) {
       alert('Delete failed: ' + err.message)

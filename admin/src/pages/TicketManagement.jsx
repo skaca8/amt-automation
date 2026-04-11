@@ -33,7 +33,7 @@ export default function TicketManagement() {
     setLoading(true)
     setError('')
     try {
-      const res = await get('/admin/tickets')
+      const res = await get('/admin/products/tickets')
       setTickets(res.tickets || res.data || res || [])
     } catch (err) {
       setError(err.message)
@@ -70,11 +70,11 @@ export default function TicketManagement() {
   const saveTicket = async () => {
     setSaving(true)
     try {
-      const payload = { ...form, price: Number(form.price) }
+      const payload = { ...form, base_price: Number(form.price) }
       if (editing) {
-        await put(`/admin/tickets/${editing._id || editing.id}`, payload)
+        await put(`/admin/products/tickets/${editing._id || editing.id}`, payload)
       } else {
-        await post('/admin/tickets', payload)
+        await post('/admin/products/tickets', payload)
       }
       setShowModal(false)
       loadTickets()
@@ -88,7 +88,7 @@ export default function TicketManagement() {
   const deleteTicket = async (ticket) => {
     if (!window.confirm(`Delete "${ticket.name_en}"? This action cannot be undone.`)) return
     try {
-      await del(`/admin/tickets/${ticket._id || ticket.id}`)
+      await del(`/admin/products/tickets/${ticket._id || ticket.id}`)
       loadTickets()
     } catch (err) {
       alert('Delete failed: ' + err.message)
