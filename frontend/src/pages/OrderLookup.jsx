@@ -176,16 +176,18 @@ export default function OrderLookup() {
     setResults(null)
 
     try {
+      // Backend /bookings/lookup expects snake_case `booking_number`; the
+      // previous camelCase param name silently dropped the filter.
       const params = new URLSearchParams()
-      if (bookingNumber) params.set('bookingNumber', bookingNumber)
+      if (bookingNumber) params.set('booking_number', bookingNumber)
       if (email) params.set('email', email)
       if (phone) params.set('phone', phone)
 
       const data = await get(`/bookings/lookup?${params.toString()}`)
-      const bookings = data.bookings || data.data || (Array.isArray(data) ? data : data.booking ? [data.booking] : [data])
+      const bookings = data.bookings || []
       setResults(bookings)
     } catch (err) {
-      setError(err.message || 'Lookup failed')
+      setError(err.message || t('common.error'))
     } finally {
       setLoading(false)
     }
@@ -282,29 +284,36 @@ export default function OrderLookup() {
           <div style={styles.resultsList}>
             {results.length > 0 ? (
               results.map(booking => {
-                const bid = booking._id || booking.id
+                const bid = booking.id
+                // Guest lookups must carry the guest_email through to the
+                // detail page so the backend's ownership check on
+                // GET /bookings/:id accepts the request.
+                const emailForDetail = email || booking.guest_email || ''
+                const detailHref = emailForDetail
+                  ? `/booking/confirmation/${bid}?email=${encodeURIComponent(emailForDetail)}`
+                  : `/booking/confirmation/${bid}`
                 return (
                   <div
                     key={bid}
                     style={styles.resultCard}
-                    onClick={() => navigate(`/my-bookings/${bid}`)}
+                    onClick={() => navigate(detailHref)}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.background = 'var(--bg)' }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'transparent' }}
                   >
                     <div style={styles.resultLeft}>
                       <div style={styles.resultId}>
-                        #{booking.bookingNumber || booking.confirmationNumber || bid?.slice(-8)}
+                        {booking.booking_number || `#${bid}`}
                       </div>
                       <div style={styles.resultName}>
-                        {booking.productName || booking.product?.name || 'Booking'}
+                        {booking.product_type || 'Booking'}
                       </div>
                       <div style={styles.resultDate}>
-                        {booking.createdAt ? new Date(booking.createdAt).toLocaleDateString() : ''}
+                        {booking.created_at ? new Date(booking.created_at).toLocaleDateString() : ''}
                       </div>
                     </div>
                     <div style={styles.resultRight}>
                       <div style={styles.resultPrice}>
-                        {t('common.currency')} {(booking.totalPrice || booking.total || 0).toLocaleString()}
+                        {t('common.currency')} {Number(booking.total_price || 0).toLocaleString()}
                       </div>
                       <span className={`badge ${getStatusBadge(booking.status)}`}>
                         {t(`statuses.${booking.status || 'pending'}`)}

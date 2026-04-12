@@ -1,7 +1,16 @@
 import React, { useState, useEffect } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { get } from '../utils/api'
+
+// Picks the locale-appropriate field off a backend product record.
+// Falls back to the English value so callers still see content when a
+// row is missing its `_cn` translation.
+function pickLocalized(obj, field, lang) {
+  if (!obj) return ''
+  const key = `${field}_${lang === 'cn' ? 'cn' : 'en'}`
+  return obj[key] || obj[`${field}_en`] || obj[field] || ''
+}
 
 const styles = {
   page: {
@@ -149,9 +158,11 @@ const styles = {
 
 export default function BookingConfirmation() {
   const { bookingId } = useParams()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { t } = useTranslation()
-  const [booking, setBooking] = useState(null)
+  const { t, i18n } = useTranslation()
+  const lang = i18n.language && i18n.language.startsWith('zh') ? 'cn' : (i18n.language || 'en')
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -159,8 +170,15 @@ export default function BookingConfirmation() {
     const fetchBooking = async () => {
       setLoading(true)
       try {
-        const data = await get(`/bookings/${bookingId}`)
-        setBooking(data.booking || data)
+        // Backend /bookings/:id now requires either an authenticated owner
+        // or a matching `guest_email` query param — BookingPage forwards
+        // the email via the URL so guest flows still work.
+        const emailParam = searchParams.get('email')
+        const url = emailParam
+          ? `/bookings/${bookingId}?guest_email=${encodeURIComponent(emailParam)}`
+          : `/bookings/${bookingId}`
+        const res = await get(url)
+        setData(res || null)
       } catch (err) {
         setError(err.message)
       } finally {
@@ -168,7 +186,7 @@ export default function BookingConfirmation() {
       }
     }
     fetchBooking()
-  }, [bookingId])
+  }, [bookingId, searchParams])
 
   if (loading) {
     return <div style={styles.page}><div className="loading-container"><div className="spinner" /><span className="loading-text">{t('common.loading')}</span></div></div>
@@ -186,20 +204,31 @@ export default function BookingConfirmation() {
     )
   }
 
-  const bkn = booking?.bookingNumber || booking?.confirmationNumber || bookingId
-  const voucherCode = booking?.voucherCode || booking?.voucher?.code || ''
-  const productName = booking?.productName || booking?.product?.name || booking?.hotel?.name || booking?.ticket?.name || booking?.package?.name || ''
-  const totalPrice = booking?.totalPrice || booking?.total || 0
+  // Backend response shape: { booking, voucher, payment, product, room_type }.
+  // All booking columns are snake_case because they come straight from the
+  // sqlite row.
+  const booking = data?.booking || null
+  const voucher = data?.voucher || booking?.voucher || null
+  const product = data?.product || null
+  const roomType = data?.room_type || null
+
+  const bkn = booking?.booking_number || bookingId
+  const voucherCode = voucher?.code || ''
+  const productName = pickLocalized(product, 'name', lang)
+  const totalPrice = Number(booking?.total_price || 0)
   const status = booking?.status || 'confirmed'
   const bookingQuantity = booking?.quantity || 1
-  const bookingType = booking?.type || ''
+  const bookingType = booking?.product_type || ''
+  const checkIn = booking?.check_in || ''
+  const checkOut = booking?.check_out || ''
+  const visitDate = booking?.visit_date || ''
 
   return (
     <div style={styles.page}>
       <div style={styles.successCard}>
         <div style={styles.checkmark}>&#10003;</div>
         <h1 style={styles.successTitle}>{t('booking.success')}</h1>
-        <p style={styles.successSubtitle}>Your booking has been confirmed. A confirmation email will be sent shortly.</p>
+        <p style={styles.successSubtitle}>{t('booking.confirmationMessage')}</p>
 
         <div style={styles.bookingNumberBox}>
           <div style={styles.bookingNumberLabel}>{t('booking.bookingNumber')}</div>
@@ -210,7 +239,14 @@ export default function BookingConfirmation() {
           {productName && (
             <div style={styles.detailItem}>
               <div style={styles.detailLabel}>{t('booking.product')}</div>
-              <div style={styles.detailValue}>{productName}</div>
+              <div style={styles.detailValue}>
+                {productName}
+                {roomType && (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                    {pickLocalized(roomType, 'name', lang)}
+                  </div>
+                )}
+              </div>
             </div>
           )}
           <div style={styles.detailItem}>
@@ -219,21 +255,23 @@ export default function BookingConfirmation() {
               <span className={`badge badge-${status}`}>{t(`statuses.${status}`)}</span>
             </div>
           </div>
-          {(booking?.checkIn || booking?.visitDate || booking?.startDate) && (
+          {(checkIn || visitDate) && (
             <div style={styles.detailItem}>
               <div style={styles.detailLabel}>{t('booking.dates')}</div>
               <div style={styles.detailValue}>
-                {booking.checkIn && booking.checkOut
-                  ? `${new Date(booking.checkIn).toLocaleDateString()} - ${new Date(booking.checkOut).toLocaleDateString()}`
-                  : new Date(booking.visitDate || booking.startDate).toLocaleDateString()
+                {checkIn && checkOut
+                  ? `${new Date(checkIn).toLocaleDateString()} - ${new Date(checkOut).toLocaleDateString()}`
+                  : visitDate ? new Date(visitDate).toLocaleDateString() : '-'
                 }
               </div>
             </div>
           )}
           {bookingQuantity > 1 && (bookingType === 'ticket' || bookingType === 'package') && (
             <div style={styles.detailItem}>
-              <div style={styles.detailLabel}>Quantity</div>
-              <div style={styles.detailValue}>{bookingQuantity} {bookingQuantity === 1 ? 'person' : 'persons'}</div>
+              <div style={styles.detailLabel}>{t('booking.quantity')}</div>
+              <div style={styles.detailValue}>
+                {bookingQuantity} {bookingQuantity === 1 ? t('common.person') : t('common.persons')}
+              </div>
             </div>
           )}
           {totalPrice > 0 && (

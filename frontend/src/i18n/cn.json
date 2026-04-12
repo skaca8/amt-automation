@@ -98,6 +98,7 @@
     "total": "合计",
     "confirm": "确认预订",
     "success": "预订成功！",
+    "confirmationMessage": "您的预订已确认，确认邮件稍后将发送至您的邮箱。",
     "bookingNumber": "预订编号",
     "viewVoucher": "查看凭证",
     "processing": "正在处理您的预订...",
@@ -110,7 +111,12 @@
     "nights": "晚",
     "paymentNote": "入住时付款",
     "guestCount": "客人数量",
-    "nationality": "国籍"
+    "nationality": "国籍",
+    "quantity": "数量",
+    "unitPrice": "单价",
+    "roomRate": "房价",
+    "requiredFieldsMissing": "请填写所有必填项。",
+    "failedToCreate": "预订创建失败。"
   },
   "myBookings": {
     "title": "我的预订",

@@ -459,7 +459,9 @@ export default function Profile() {
             {recentBookings.length > 0 ? (
               <div style={styles.bookingSummary}>
                 {recentBookings.map(b => {
-                  const bid = b._id || b.id
+                  // `/bookings/my` returns raw booking rows — all keys
+                  // are snake_case here.
+                  const bid = b.id
                   return (
                     <div
                       key={bid}
@@ -470,10 +472,10 @@ export default function Profile() {
                     >
                       <div style={styles.bookingItemLeft}>
                         <div style={styles.bookingItemName}>
-                          {b.productName || b.product?.name || 'Booking'}
+                          {b.booking_number || `#${bid}`}
                         </div>
                         <div style={styles.bookingItemDate}>
-                          {b.createdAt ? new Date(b.createdAt).toLocaleDateString() : ''}
+                          {b.created_at ? new Date(b.created_at).toLocaleDateString() : ''}
                           {' - '}
                           <span className={`badge badge-${b.status || 'pending'}`} style={{ display: 'inline', padding: '2px 8px', fontSize: '0.65rem' }}>
                             {t(`statuses.${b.status || 'pending'}`)}
@@ -481,7 +483,7 @@ export default function Profile() {
                         </div>
                       </div>
                       <div style={styles.bookingItemPrice}>
-                        {t('common.currency')} {(b.totalPrice || b.total || 0).toLocaleString()}
+                        {t('common.currency')} {Number(b.total_price || 0).toLocaleString()}
                       </div>
                     </div>
                   )

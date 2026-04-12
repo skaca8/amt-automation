@@ -59,7 +59,9 @@ export function AuthProvider({ children }) {
   }
 
   const updateProfile = async (profileData) => {
-    const data = await put('/auth/profile', profileData)
+    // Backend exposes PUT /api/auth/me (see backend/src/routes/auth.js).
+    // The old '/auth/profile' path 404'd on every save.
+    const data = await put('/auth/me', profileData)
     setUser(data.user || data)
     return data
   }

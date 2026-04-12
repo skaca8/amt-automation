@@ -7,7 +7,17 @@ const router = express.Router();
 // All routes require admin authentication
 router.use(authenticate, requireAdmin);
 
-// PUT /featured - quick toggle featured status
+// Map of accepted product_type values → the actual table name the admin
+// endpoints act on. Using an explicit allow-list prevents the previous bug
+// where an unrecognized product_type silently defaulted to `packages` and
+// wrote to the wrong table.
+const PRODUCT_TABLES = {
+  hotel: 'hotels',
+  ticket: 'tickets',
+  package: 'packages',
+};
+
+// PUT /featured - quick toggle featured / sort_order on a product.
 router.put('/featured', (req, res) => {
   try {
     const db = getDb();
@@ -17,7 +27,12 @@ router.put('/featured', (req, res) => {
       return res.status(400).json({ error: 'product_type and product_id are required.' });
     }
 
-    const table = product_type === 'hotel' ? 'hotels' : product_type === 'ticket' ? 'tickets' : 'packages';
+    const table = PRODUCT_TABLES[product_type];
+    if (!table) {
+      return res.status(400).json({
+        error: `product_type must be one of: ${Object.keys(PRODUCT_TABLES).join(', ')}.`
+      });
+    }
 
     const updates = [];
     const values = [];
@@ -30,6 +45,8 @@ router.put('/featured', (req, res) => {
     }
 
     values.push(product_id);
+    // `table` comes from the whitelisted PRODUCT_TABLES map, so interpolating
+    // it into the SQL string is safe — no user string reaches the query.
     db.prepare(`UPDATE ${table} SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
     res.json({ message: 'Featured status updated.' });

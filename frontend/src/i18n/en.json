@@ -98,6 +98,7 @@
     "total": "Total",
     "confirm": "Confirm Booking",
     "success": "Booking Confirmed!",
+    "confirmationMessage": "Your booking has been confirmed. A confirmation email will be sent shortly.",
     "bookingNumber": "Booking Number",
     "viewVoucher": "View Voucher",
     "processing": "Processing your booking...",
@@ -110,7 +111,12 @@
     "nights": "nights",
     "paymentNote": "Payment will be processed at check-in",
     "guestCount": "Number of Guests",
-    "nationality": "Nationality"
+    "nationality": "Nationality",
+    "quantity": "Quantity",
+    "unitPrice": "Unit Price",
+    "roomRate": "Room Rate",
+    "requiredFieldsMissing": "Please fill in all required fields.",
+    "failedToCreate": "Failed to create booking."
   },
   "myBookings": {
     "title": "My Bookings",

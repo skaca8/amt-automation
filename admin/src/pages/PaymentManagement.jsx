@@ -30,8 +30,10 @@ export default function PaymentManagement() {
       params.set('limit', 20)
       if (filters.status) params.set('status', filters.status)
       if (filters.method) params.set('method', filters.method)
-      if (filters.startDate) params.set('start_date', filters.startDate)
-      if (filters.endDate) params.set('end_date', filters.endDate)
+      // Backend expects `from_date` / `to_date` (see routes/admin/payments.js).
+      // The previous start_date/end_date names silently did nothing.
+      if (filters.startDate) params.set('from_date', filters.startDate)
+      if (filters.endDate) params.set('to_date', filters.endDate)
 
       const res = await get(`/admin/payments?${params.toString()}`)
       setPayments(res.payments || res.data || [])

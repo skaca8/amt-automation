@@ -4,6 +4,23 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import { get, post } from '../utils/api'
 
+// Picks the locale-appropriate field off a backend product object.
+// The API stores bilingual fields as `<field>_en` / `<field>_cn`.
+// Falls back to the English value so Chinese callers still see content
+// when a row is missing its `_cn` translation.
+function pickLocalized(obj, field, lang) {
+  if (!obj) return ''
+  const key = `${field}_${lang === 'cn' ? 'cn' : 'en'}`
+  return obj[key] || obj[`${field}_en`] || obj[field] || ''
+}
+
+// Reads the product's base price regardless of which product type it is.
+// Backend schema uses `base_price` on hotels/tickets/packages/room_types.
+function readBasePrice(obj) {
+  if (!obj) return 0
+  return Number(obj.base_price ?? obj.price ?? obj.basePrice ?? 0)
+}
+
 const styles = {
   page: {
     maxWidth: 'var(--max-width)',
@@ -219,7 +236,10 @@ export default function BookingPage() {
   const { type, id } = useParams()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  // Normalize the active i18n locale so pickLocalized() can select the
+  // right `_en` / `_cn` column from bilingual backend records.
+  const lang = i18n.language && i18n.language.startsWith('zh') ? 'cn' : (i18n.language || 'en')
   const { user, isAuthenticated } = useAuth()
 
   const [product, setProduct] = useState(null)
@@ -265,7 +285,22 @@ export default function BookingPage() {
         else throw new Error('Invalid booking type')
 
         const data = await get(endpoint)
-        setProduct(data.hotel || data.ticket || data.package || data)
+        // Hotel detail returns `{ hotel, room_types }` — merge the
+        // room_types array onto the product so the summary/totalling code
+        // only has to look in one place. Tickets/packages return a single
+        // wrapped object.
+        let resolved
+        if (type === 'hotel') {
+          resolved = data.hotel ? { ...data.hotel, room_types: data.room_types || [] } : null
+        } else if (type === 'ticket') {
+          resolved = data.ticket || null
+        } else if (type === 'package') {
+          resolved = data.package || null
+        } else {
+          resolved = data
+        }
+        if (!resolved) throw new Error('Product not found')
+        setProduct(resolved)
       } catch (err) {
         setError(err.message)
       } finally {
@@ -275,20 +310,24 @@ export default function BookingPage() {
     fetchProduct()
   }, [type, id])
 
+  // Resolves the currently selected room_type object from the hotel's
+  // room_types array. Coerces both sides to string because URL params are
+  // always strings but backend ids are integers.
+  const getSelectedRoom = () => {
+    if (!product) return null
+    const roomTypes = product.room_types || []
+    if (roomTypeId) {
+      return roomTypes.find(r => String(r.id) === String(roomTypeId)) || null
+    }
+    return roomTypes[0] || null
+  }
+
   const calculateTotal = () => {
     if (!product) return 0
 
     if (type === 'hotel') {
-      let roomPrice = 0
-      const roomTypes = product.roomTypes || []
-      if (roomTypeId) {
-        const room = roomTypes.find(r => (r._id || r.id) === roomTypeId)
-        roomPrice = room ? (room.price || room.basePrice || 0) : 0
-      } else if (roomTypes.length > 0) {
-        roomPrice = roomTypes[0].price || roomTypes[0].basePrice || 0
-      } else {
-        roomPrice = product.price || product.basePrice || 0
-      }
+      const room = getSelectedRoom()
+      const roomPrice = room ? readBasePrice(room) : readBasePrice(product)
 
       if (checkIn && checkOut) {
         const nights = Math.max(1, Math.ceil((new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24)))
@@ -297,15 +336,11 @@ export default function BookingPage() {
       return roomPrice
     }
 
-    if (type === 'ticket') {
-      return (product.price || product.basePrice || 0) * quantity
+    if (type === 'ticket' || type === 'package') {
+      return readBasePrice(product) * quantity
     }
 
-    if (type === 'package') {
-      return (product.price || product.basePrice || 0) * quantity
-    }
-
-    return product.price || product.basePrice || 0
+    return readBasePrice(product)
   }
 
   const getNights = () => {
@@ -315,17 +350,18 @@ export default function BookingPage() {
     return 1
   }
 
+  // Returns the currently selected room type's localized name, or '' if
+  // the user hasn't picked a room.
   const getRoomTypeName = () => {
-    if (!product || !roomTypeId) return ''
-    const roomTypes = product.roomTypes || []
-    const room = roomTypes.find(r => (r._id || r.id) === roomTypeId)
-    return room ? (room.name || room.type || '') : ''
+    const room = roomTypeId ? getSelectedRoom() : null
+    if (!room) return ''
+    return pickLocalized(room, 'name', lang)
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.name || !form.email || !form.phone) {
-      setSubmitError('Please fill in all required fields')
+      setSubmitError(t('booking.requiredFieldsMissing'))
       return
     }
 
@@ -333,33 +369,42 @@ export default function BookingPage() {
     setSubmitError(null)
 
     try {
+      // Backend contract (backend/src/routes/bookings.js POST /) is strict
+      // snake_case — sending camelCase previously caused a 400 before any
+      // DB work ran. Keep this payload aligned with that route handler.
       const bookingData = {
-        type,
-        productId: id,
-        guestName: form.name,
-        guestEmail: form.email,
-        guestPhone: form.phone,
-        specialRequests: form.specialRequests,
-        nationality: form.nationality,
+        product_type: type,
+        product_id: Number(id),
+        guest_name: form.name,
+        guest_email: form.email,
+        guest_phone: form.phone,
+        special_requests: form.specialRequests || null,
       }
 
       if (type === 'hotel') {
-        bookingData.checkIn = checkIn
-        bookingData.checkOut = checkOut
-        if (roomTypeId) bookingData.roomTypeId = roomTypeId
+        bookingData.check_in = checkIn
+        bookingData.check_out = checkOut
+        if (roomTypeId) bookingData.room_type_id = Number(roomTypeId)
       } else if (type === 'ticket') {
-        bookingData.visitDate = visitDate
+        bookingData.visit_date = visitDate
         bookingData.quantity = quantity
       } else if (type === 'package') {
-        bookingData.startDate = visitDate
+        bookingData.visit_date = visitDate
         bookingData.quantity = quantity
       }
 
       const result = await post('/bookings', bookingData)
-      const bookingId = result.booking?._id || result.booking?.id || result._id || result.id
-      navigate(`/booking/confirmation/${bookingId}`)
+      // sql.js returns integer ids under `id`; there is no `_id`.
+      const bookingId = result.booking?.id || result.id
+      if (!bookingId) throw new Error('Booking created but response was missing id')
+      // Forward the guest email so the confirmation page can re-fetch the
+      // booking even when the user is not logged in — the backend's
+      // ownership check accepts `guest_email` as an authorization signal
+      // for guest bookings.
+      const emailParam = encodeURIComponent(form.email)
+      navigate(`/booking/confirmation/${bookingId}?email=${emailParam}`)
     } catch (err) {
-      setSubmitError(err.message || 'Failed to create booking')
+      setSubmitError(err.message || t('booking.failedToCreate'))
     } finally {
       setSubmitting(false)
     }
@@ -486,7 +531,7 @@ export default function BookingPage() {
                 {typeIcons[type] || typeIcons.hotel}
               </div>
               <div style={styles.productInfo}>
-                <div style={styles.productName}>{product.name || product.title}</div>
+                <div style={styles.productName}>{pickLocalized(product, 'name', lang)}</div>
                 {getRoomTypeName() && (
                   <div style={styles.productMeta}>{getRoomTypeName()}</div>
                 )}
@@ -530,8 +575,10 @@ export default function BookingPage() {
                   <span style={styles.summaryValue}>{visitDate || '-'}</span>
                 </div>
                 <div style={styles.summaryRow}>
-                  <span style={styles.summaryLabel}>Quantity</span>
-                  <span style={styles.summaryValue}>{quantity} {quantity === 1 ? 'person' : 'persons'}</span>
+                  <span style={styles.summaryLabel}>{t('booking.quantity')}</span>
+                  <span style={styles.summaryValue}>
+                    {quantity} {quantity === 1 ? t('common.person') : t('common.persons')}
+                  </span>
                 </div>
               </>
             )}
@@ -541,12 +588,16 @@ export default function BookingPage() {
             {(type === 'ticket' || type === 'package') && (
               <div style={{ marginBottom: 8 }}>
                 <div style={styles.summaryRow}>
-                  <span style={styles.summaryLabel}>Unit Price</span>
-                  <span style={styles.summaryValue}>{'\u20A9'}{(product.price || product.basePrice || 0).toLocaleString()} / person</span>
+                  <span style={styles.summaryLabel}>{t('booking.unitPrice')}</span>
+                  <span style={styles.summaryValue}>
+                    {'\u20A9'}{readBasePrice(product).toLocaleString()} / {t('common.person')}
+                  </span>
                 </div>
                 {quantity > 1 && (
                   <div style={styles.summaryRow}>
-                    <span style={styles.summaryLabel}>{'\u00D7'} {quantity} persons</span>
+                    <span style={styles.summaryLabel}>
+                      {'\u00D7'} {quantity} {t('common.persons')}
+                    </span>
                     <span style={styles.summaryValue}>{'\u20A9'}{total.toLocaleString()}</span>
                   </div>
                 )}
@@ -556,23 +607,16 @@ export default function BookingPage() {
             {type === 'hotel' && checkIn && checkOut && (
               <div style={{ marginBottom: 8 }}>
                 <div style={styles.summaryRow}>
-                  <span style={styles.summaryLabel}>Room Rate</span>
-                  <span style={styles.summaryValue}>{'\u20A9'}{(() => {
-                    const roomTypes = product.roomTypes || []
-                    let roomPrice = 0
-                    if (roomTypeId) {
-                      const room = roomTypes.find(r => (r._id || r.id) === roomTypeId)
-                      roomPrice = room ? (room.price || room.basePrice || 0) : 0
-                    } else if (roomTypes.length > 0) {
-                      roomPrice = roomTypes[0].price || roomTypes[0].basePrice || 0
-                    } else {
-                      roomPrice = product.price || product.basePrice || 0
-                    }
-                    return roomPrice.toLocaleString()
-                  })()} / room / night</span>
+                  <span style={styles.summaryLabel}>{t('booking.roomRate')}</span>
+                  <span style={styles.summaryValue}>
+                    {'\u20A9'}{(getSelectedRoom() ? readBasePrice(getSelectedRoom()) : readBasePrice(product)).toLocaleString()}{' '}
+                    / {t('hotel.perNight')}
+                  </span>
                 </div>
                 <div style={styles.summaryRow}>
-                  <span style={styles.summaryLabel}>{getNights()} night{getNights() > 1 ? 's' : ''}</span>
+                  <span style={styles.summaryLabel}>
+                    {getNights()} {getNights() > 1 ? t('common.nights') : t('common.night')}
+                  </span>
                   <span style={styles.summaryValue}>{'\u20A9'}{total.toLocaleString()}</span>
                 </div>
               </div>

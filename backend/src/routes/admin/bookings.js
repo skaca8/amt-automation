@@ -1,8 +1,16 @@
 const express = require('express');
 const { getDb } = require('../../config/database');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
+// Reuse the inventory-restore loop from the customer booking route so admin
+// cancellations / refunds release the same per-date counters that the
+// original reservation consumed.
+const { restoreBookingInventory } = require('../bookings');
 
 const router = express.Router();
+
+// Allow-list of booking status values admins can set. Anything outside this
+// set would corrupt downstream queries (dashboards, filters, etc.).
+const ALLOWED_BOOKING_STATUSES = ['pending', 'confirmed', 'cancelled', 'refunded', 'completed'];
 
 // All routes require admin authentication
 router.use(authenticate, requireAdmin);
@@ -222,7 +230,10 @@ router.get('/:id', (req, res) => {
   }
 });
 
-// PUT /:id/status - update booking status
+// PUT /:id/status - update booking status.
+// When an admin transitions a booking to `cancelled`, we must also release
+// the inventory the booking was holding and deactivate its voucher — the
+// previous implementation silently leaked inventory forever.
 router.put('/:id/status', (req, res) => {
   try {
     const db = getDb();
@@ -231,20 +242,36 @@ router.put('/:id/status', (req, res) => {
     if (!status) {
       return res.status(400).json({ error: 'status is required.' });
     }
+    if (!ALLOWED_BOOKING_STATUSES.includes(status)) {
+      return res.status(400).json({
+        error: `status must be one of: ${ALLOWED_BOOKING_STATUSES.join(', ')}.`
+      });
+    }
 
     const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(req.params.id);
     if (!booking) {
       return res.status(404).json({ error: 'Booking not found.' });
     }
 
-    db.prepare("UPDATE bookings SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, req.params.id);
+    // Wrap all writes in a single transaction so a mid-flight failure
+    // doesn't leave inventory half-released or status inconsistent with
+    // the voucher.
+    const updated = db.transaction(() => {
+      // Only restore inventory on the cancelled/refunded transition, and
+      // only if the booking wasn't already in a released state — that
+      // guards against double-decrement when an admin clicks cancel twice.
+      const wasReleased = booking.status === 'cancelled' || booking.status === 'refunded';
+      if (!wasReleased && (status === 'cancelled' || status === 'refunded')) {
+        restoreBookingInventory(db, booking);
+        db.prepare("UPDATE vouchers SET status = 'cancelled' WHERE booking_id = ?").run(booking.id);
+      }
 
-    // If cancelled, deactivate voucher
-    if (status === 'cancelled') {
-      db.prepare("UPDATE vouchers SET status = 'cancelled' WHERE booking_id = ?").run(req.params.id);
-    }
+      db.prepare("UPDATE bookings SET status = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(status, booking.id);
 
-    const updated = db.prepare('SELECT * FROM bookings WHERE id = ?').get(req.params.id);
+      return db.prepare('SELECT * FROM bookings WHERE id = ?').get(booking.id);
+    })();
+
     res.json({ message: 'Booking status updated.', booking: updated });
   } catch (err) {
     console.error('Admin update booking status error:', err);
@@ -252,7 +279,10 @@ router.put('/:id/status', (req, res) => {
   }
 });
 
-// PUT /:id/payment - update payment status
+// PUT /:id/payment - update payment status.
+// All three writes (bookings.payment_status, payments.status, optional
+// bookings.status flip to 'confirmed') are wrapped in one transaction so
+// the booking and payment tables can never disagree about paid/unpaid.
 router.put('/:id/payment', (req, res) => {
   try {
     const db = getDb();
@@ -267,35 +297,43 @@ router.put('/:id/payment', (req, res) => {
       return res.status(404).json({ error: 'Booking not found.' });
     }
 
-    const updates = ["payment_status = ?", "updated_at = datetime('now')"];
-    const values = [payment_status];
+    const updated = db.transaction(() => {
+      // Update the booking's denormalized payment_status (and optional
+      // payment_id pointer to the gateway reference).
+      const updates = ["payment_status = ?", "updated_at = datetime('now')"];
+      const values = [payment_status];
 
-    if (payment_id) {
-      updates.push('payment_id = ?');
-      values.push(payment_id);
-    }
+      if (payment_id) {
+        updates.push('payment_id = ?');
+        values.push(payment_id);
+      }
 
-    values.push(req.params.id);
-    db.prepare(`UPDATE bookings SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+      values.push(booking.id);
+      db.prepare(`UPDATE bookings SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-    // Update corresponding payment record
-    const paymentUpdates = ['status = ?'];
-    const paymentValues = [payment_status];
+      // Mirror the change on the matching payments row.
+      const paymentUpdates = ['status = ?'];
+      const paymentValues = [payment_status];
 
-    if (payment_id) {
-      paymentUpdates.push('stripe_payment_id = ?');
-      paymentValues.push(payment_id);
-    }
+      if (payment_id) {
+        paymentUpdates.push('stripe_payment_id = ?');
+        paymentValues.push(payment_id);
+      }
 
-    paymentValues.push(booking.id);
-    db.prepare(`UPDATE payments SET ${paymentUpdates.join(', ')} WHERE booking_id = ?`).run(...paymentValues);
+      paymentValues.push(booking.id);
+      db.prepare(`UPDATE payments SET ${paymentUpdates.join(', ')} WHERE booking_id = ?`).run(...paymentValues);
 
-    // If paid, update booking status to confirmed
-    if (payment_status === 'paid') {
-      db.prepare("UPDATE bookings SET status = 'confirmed', updated_at = datetime('now') WHERE id = ? AND status = 'pending'").run(req.params.id);
-    }
+      // If the payment just flipped to 'paid' and the booking was still
+      // pending, auto-confirm it. Other states (cancelled, refunded) are
+      // intentionally left alone.
+      if (payment_status === 'paid') {
+        db.prepare("UPDATE bookings SET status = 'confirmed', updated_at = datetime('now') WHERE id = ? AND status = 'pending'")
+          .run(booking.id);
+      }
 
-    const updated = db.prepare('SELECT * FROM bookings WHERE id = ?').get(req.params.id);
+      return db.prepare('SELECT * FROM bookings WHERE id = ?').get(booking.id);
+    })();
+
     res.json({ message: 'Payment status updated.', booking: updated });
   } catch (err) {
     console.error('Admin update payment status error:', err);
@@ -303,7 +341,9 @@ router.put('/:id/payment', (req, res) => {
   }
 });
 
-// POST /:id/refund - process refund
+// POST /:id/refund - process a refund.
+// Must also release the inventory the booking was holding, otherwise the
+// resort loses sellable rooms/tickets/packages forever.
 router.post('/:id/refund', (req, res) => {
   try {
     const db = getDb();
@@ -325,17 +365,27 @@ router.post('/:id/refund', (req, res) => {
       return res.status(400).json({ error: 'Invalid refund amount.' });
     }
 
-    // Update payment
-    db.prepare("UPDATE payments SET refund_amount = ?, status = 'refunded' WHERE booking_id = ?").run(amount, booking.id);
+    const { updated, updatedPayment } = db.transaction(() => {
+      // Only restore inventory if the booking wasn't already released by a
+      // previous cancel/refund — prevents double-decrement.
+      const wasReleased = booking.status === 'cancelled' || booking.status === 'refunded';
+      if (!wasReleased) {
+        restoreBookingInventory(db, booking);
+      }
 
-    // Update booking
-    db.prepare("UPDATE bookings SET status = 'refunded', payment_status = 'refunded', updated_at = datetime('now') WHERE id = ?").run(booking.id);
+      db.prepare("UPDATE payments SET refund_amount = ?, status = 'refunded' WHERE booking_id = ?")
+        .run(amount, booking.id);
 
-    // Deactivate voucher
-    db.prepare("UPDATE vouchers SET status = 'cancelled' WHERE booking_id = ?").run(booking.id);
+      db.prepare("UPDATE bookings SET status = 'refunded', payment_status = 'refunded', updated_at = datetime('now') WHERE id = ?")
+        .run(booking.id);
 
-    const updated = db.prepare('SELECT * FROM bookings WHERE id = ?').get(booking.id);
-    const updatedPayment = db.prepare('SELECT * FROM payments WHERE booking_id = ?').get(booking.id);
+      db.prepare("UPDATE vouchers SET status = 'cancelled' WHERE booking_id = ?").run(booking.id);
+
+      return {
+        updated: db.prepare('SELECT * FROM bookings WHERE id = ?').get(booking.id),
+        updatedPayment: db.prepare('SELECT * FROM payments WHERE booking_id = ?').get(booking.id)
+      };
+    })();
 
     res.json({
       message: 'Refund processed successfully.',
