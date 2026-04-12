@@ -52,6 +52,24 @@ export function AuthProvider({ children }) {
     return data
   }
 
+  // Exchanges a Google Identity Services ID token for a backend session.
+  // The backend (POST /api/auth/google) verifies the token against
+  // Google's public keys, creates-or-links the local user row, and
+  // returns the same { token, user } shape as the password login so the
+  // rest of the app stays unchanged.
+  const loginWithGoogle = async (credential) => {
+    const data = await post('/auth/google', { credential })
+    const newToken = data.token
+    const userData = data.user
+    if (!newToken) {
+      throw new Error('Google sign-in failed: no session token returned.')
+    }
+    localStorage.setItem('token', newToken)
+    setToken(newToken)
+    setUser(userData)
+    return data
+  }
+
   const logout = () => {
     localStorage.removeItem('token')
     setToken(null)
@@ -78,6 +96,7 @@ export function AuthProvider({ children }) {
         register,
         logout,
         updateProfile,
+        loginWithGoogle,
         isAuthenticated
       }}
     >

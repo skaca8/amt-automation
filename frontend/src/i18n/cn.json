@@ -149,7 +149,10 @@
     "orderLookup": "无需登录查询订单",
     "welcomeBack": "欢迎回来！",
     "createAccount": "创建您的账户",
-    "passwordMismatch": "两次输入的密码不一致"
+    "passwordMismatch": "两次输入的密码不一致",
+    "orDivider": "或",
+    "signInWithGoogle": "使用 Google 登录",
+    "googleNotConfigured": "此环境未配置 Google 登录。"
   },
   "common": {
     "loading": "加载中...",

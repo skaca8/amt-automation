@@ -14,7 +14,12 @@ function authenticate(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     const db = getDb();
-    const user = db.prepare('SELECT id, email, name, phone, nationality, role, language, created_at FROM users WHERE id = ?').get(decoded.userId);
+    // Explicitly list columns so we never leak the password hash, but
+    // include `avatar_url` / `google_id` so the client UI can render
+    // Google profile pictures and surface the social-login state.
+    const user = db.prepare(
+      'SELECT id, email, name, phone, nationality, role, language, avatar_url, google_id, created_at FROM users WHERE id = ?'
+    ).get(decoded.userId);
 
     if (!user) {
       return res.status(401).json({ error: 'User not found. Token may be invalid.' });

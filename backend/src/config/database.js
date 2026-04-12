@@ -299,6 +299,13 @@ function initTables(db) {
     "ALTER TABLE tickets ADD COLUMN sort_order INTEGER DEFAULT 0",
     "ALTER TABLE packages ADD COLUMN is_featured INTEGER DEFAULT 0",
     "ALTER TABLE packages ADD COLUMN sort_order INTEGER DEFAULT 0",
+    // Social-login columns. `google_id` stores Google's stable subject
+    // claim (`sub`) so we can re-identify a user across logins; it also
+    // serves as the flag that marks a row as a social-login account.
+    // `avatar_url` caches the profile picture Google returns so the UI
+    // can render it without a second round trip.
+    "ALTER TABLE users ADD COLUMN google_id TEXT",
+    "ALTER TABLE users ADD COLUMN avatar_url TEXT",
   ];
   for (const sql of alterStatements) {
     try { db.exec(sql); } catch (e) { /* column already exists */ }

@@ -149,7 +149,10 @@
     "orderLookup": "Look up order without login",
     "welcomeBack": "Welcome back!",
     "createAccount": "Create your account",
-    "passwordMismatch": "Passwords do not match"
+    "passwordMismatch": "Passwords do not match",
+    "orDivider": "or",
+    "signInWithGoogle": "Sign in with Google",
+    "googleNotConfigured": "Google Sign-In is not configured for this environment."
   },
   "common": {
     "loading": "Loading...",

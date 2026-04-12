@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
+import GoogleSignInButton from '../components/GoogleSignInButton'
 
 const styles = {
   page: {
@@ -91,12 +92,29 @@ const styles = {
     fontSize: '0.85rem',
     color: 'var(--text-muted)',
   },
+  divider: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    margin: '24px 0',
+  },
+  dividerLine: {
+    flex: 1,
+    height: '1px',
+    background: 'var(--border)',
+  },
+  dividerText: {
+    fontSize: '0.75rem',
+    fontWeight: 600,
+    color: 'var(--text-muted)',
+    textTransform: 'uppercase',
+  },
 }
 
 export default function Register() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { register } = useAuth()
+  const { register, loginWithGoogle } = useAuth()
   const [form, setForm] = useState({
     name: '',
     email: '',
@@ -107,6 +125,7 @@ export default function Register() {
   })
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
 
   const handleInput = (field) => (e) => {
     setForm(f => ({ ...f, [field]: e.target.value }))
@@ -132,11 +151,31 @@ export default function Register() {
       })
       navigate('/')
     } catch (err) {
-      setError(err.message || 'Registration failed')
+      setError(err.message || t('common.error'))
     } finally {
       setLoading(false)
     }
   }
+
+  // The Google flow is the same on Register as on Login — a Google
+  // sign-up just creates the user row on first visit, so reusing
+  // loginWithGoogle keeps the UX consistent.
+  const handleGoogleCredential = useCallback(async (credential) => {
+    setError(null)
+    setGoogleLoading(true)
+    try {
+      await loginWithGoogle(credential)
+      navigate('/')
+    } catch (err) {
+      setError(err.message || t('common.error'))
+    } finally {
+      setGoogleLoading(false)
+    }
+  }, [loginWithGoogle, navigate, t])
+
+  const handleGoogleError = useCallback((err) => {
+    setError((err && err.message) || t('common.error'))
+  }, [t])
 
   const inputProps = {
     onFocus: e => { e.target.style.borderColor = 'var(--primary)'; e.target.style.boxShadow = '0 0 0 3px rgba(26,115,232,0.1)' },
@@ -245,6 +284,21 @@ export default function Register() {
             {loading ? t('common.loading') : t('auth.registerBtn')}
           </button>
         </form>
+
+        {/* Google sign-up. Uses the same component + handler as Login
+            because Google's ID-token flow creates-or-returns the user
+            row on the backend in a single call. */}
+        <div style={styles.divider}>
+          <span style={styles.dividerLine} />
+          <span style={styles.dividerText}>{t('auth.orDivider')}</span>
+          <span style={styles.dividerLine} />
+        </div>
+
+        <GoogleSignInButton
+          onCredential={handleGoogleCredential}
+          onError={handleGoogleError}
+          disabled={googleLoading || loading}
+        />
 
         <div style={styles.footer}>
           {t('auth.hasAccount')}{' '}

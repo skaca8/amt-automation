@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
+import GoogleSignInButton from '../components/GoogleSignInButton'
 
 const styles = {
   page: {
@@ -123,11 +124,14 @@ const styles = {
 export default function Login() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { login } = useAuth()
+  const { login, loginWithGoogle } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
+  // Separate flag so the Google round trip can disable the Google
+  // button without also blocking the password form.
+  const [googleLoading, setGoogleLoading] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -138,11 +142,31 @@ export default function Login() {
       await login(email, password)
       navigate('/')
     } catch (err) {
-      setError(err.message || 'Login failed')
+      setError(err.message || t('common.error'))
     } finally {
       setLoading(false)
     }
   }
+
+  // Memoized so GoogleSignInButton's effect doesn't re-run on every
+  // parent render and re-draw the button, which would reset its
+  // internal state.
+  const handleGoogleCredential = useCallback(async (credential) => {
+    setError(null)
+    setGoogleLoading(true)
+    try {
+      await loginWithGoogle(credential)
+      navigate('/')
+    } catch (err) {
+      setError(err.message || t('common.error'))
+    } finally {
+      setGoogleLoading(false)
+    }
+  }, [loginWithGoogle, navigate, t])
+
+  const handleGoogleError = useCallback((err) => {
+    setError((err && err.message) || t('common.error'))
+  }, [t])
 
   return (
     <div style={styles.page}>
@@ -196,6 +220,22 @@ export default function Login() {
           </button>
         </form>
 
+        {/* Social sign-in. Rendered below the password form so the
+            password flow stays the primary action but Google is one
+            click away. The button component hides itself with a
+            friendly notice when VITE_GOOGLE_CLIENT_ID isn't set. */}
+        <div style={styles.divider}>
+          <span style={styles.dividerLine} />
+          <span style={styles.dividerText}>{t('auth.orDivider')}</span>
+          <span style={styles.dividerLine} />
+        </div>
+
+        <GoogleSignInButton
+          onCredential={handleGoogleCredential}
+          onError={handleGoogleError}
+          disabled={googleLoading || loading}
+        />
+
         <div style={styles.footer}>
           {t('auth.noAccount')}{' '}
           <Link to="/register" style={{ color: 'var(--primary)', fontWeight: 600 }}>
@@ -205,7 +245,7 @@ export default function Login() {
 
         <div style={styles.divider}>
           <span style={styles.dividerLine} />
-          <span style={styles.dividerText}>or</span>
+          <span style={styles.dividerText}>{t('auth.orDivider')}</span>
           <span style={styles.dividerLine} />
         </div>
 
