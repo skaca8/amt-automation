@@ -911,7 +911,58 @@ flowchart TB
 
 ## 8. 보안 및 예외 처리
 
-<!-- TODO:SECTION-8 -->
+### 8.1 위협 모델과 대응
+
+| 위협 | 영향 | 대응 | 위치 |
+|---|---|---|---|
+| 비밀번호 평문 노출 | 사용자 자격 유출 | **bcrypt (cost 10)** 해시 저장, `password` 컬럼은 `/auth/me` 응답에서 명시적으로 제외 | `routes/auth.js`, `middleware/auth.js` |
+| JWT 위변조 | 임의 사용자 위장 | **HS256 + `JWT_SECRET`** 환경변수. 개발 fallback 이 있으나 운영 배포 시 반드시 주입 | `middleware/auth.js:34` |
+| 만료된 토큰 재사용 | 세션 하이재킹 | `jwt.verify` 가 `TokenExpiredError` 던지면 전용 메시지로 401 | `middleware/auth.js:89` |
+| 삭제된 사용자의 유효 토큰 | 고스트 로그인 | 토큰 검증 직후 `SELECT ... WHERE id = ?` 로 실제 사용자 row 재조회, 없으면 401 | `middleware/auth.js:73` |
+| 예약 ID 순차 열거 | 타인 예약 PII 유출 | `GET /bookings/:id` 는 **소유자/어드민/matching guest_email 중 하나** 필수 | `routes/bookings.js` (`isAuthorizedForBooking`) |
+| 비인증 예약 취소 | 사용자 악의적 취소 공격 | `PUT /bookings/:id/cancel` 도 동일한 소유권 검증 | 같은 파일 |
+| 관리자 엔드포인트 노출 | 어드민 권한 탈취 | 모든 `/admin/*` 라우터가 상단에서 `router.use(authenticate, requireAdmin)` | `routes/admin/*.js` |
+| SQL 인젝션 (파라미터) | DB 오염 | `db.prepare(...).run(...)` 의 **prepared statement + 바인딩** 을 모든 쿼리에 적용. `${...}` 로 값 보간 금지 | 전 라우트 |
+| SQL 인젝션 (테이블명) | 우회 경로 | `/featured` 같이 테이블 이름을 동적으로 고르는 엔드포인트는 `PRODUCT_TABLES` **allow-list 맵**의 키만 허용하고 값은 맵에서 꺼내 쓴다 | `routes/admin/products.js` |
+| 인벤토리 레이스 / 부분 실패 | 유령 예약 · 재고 과다 점유 | 예약 생성 · 취소 · 상태 변경을 **단일 `db.transaction()`** 으로 감싸고, 실패 시 ROLLBACK | `routes/bookings.js`, `routes/admin/bookings.js` |
+| 중복 취소로 카운터 음수 | 재고 카운터 무결성 훼손 | 모든 복원 UPDATE 가 `booked_* = MAX(0, booked_* - qty)` | `restoreBookingInventory` |
+| 상태값 오염 | 대시보드/필터 침묵 실패 | `PUT /admin/bookings/:id/status` 는 **`ALLOWED_BOOKING_STATUSES` allow-list** 로만 허용 | `routes/admin/bookings.js` |
+| 파일 업로드 우회 | 임의 파일 저장 / XSS 벡터 | multer `fileFilter` 로 **MIME + 확장자 화이트리스트** (`jpeg/jpg/png/gif/webp`), 10MB limit, 파일명은 `timestamp-random.ext` 로 재생성 | `routes/admin/upload.js` |
+| 업로드 디렉터리 path traversal | 경로 탈출 | 파일명 생성이 서버 측 무작위 suffix, 사용자 입력은 확장자만 검사 | 같은 파일 |
+| Google ID token 스푸핑 | 가짜 Google 로그인 | `google-auth-library` 의 `verifyIdToken({ idToken, audience })` 가 Google JWKs 로 서명 · audience · 만료 검증. 실패 시 401 | `routes/auth.js` `/google` |
+| 미검증 이메일 계정 | 이메일 하이재킹 | `payload.email_verified === false` 이면 즉시 401 로 거절 | 같은 파일 |
+| 소셜 계정에 비밀번호 로그인 시도 | 혼동 로그인 | 신규 Google 사용자 생성 시 password 에 `crypto.randomBytes(32)` 의 bcrypt 해시를 저장 → 어떤 비밀번호로도 매칭 불가 | 같은 파일 (`randomPasswordHash`) |
+| GOOGLE_CLIENT_ID 미설정 | 운영상 오류 | `/auth/google` 이 `503 "Google Sign-In is not configured"` 로 명확히 반환. 일반 비밀번호 플로우는 정상 동작 유지 | 같은 파일 |
+| 과도한 페이로드 DoS | 메모리 폭증 | `express.json({ limit: '10mb' })` + multer file size 10MB 제한 | `index.js` + upload 라우트 |
+| CORS 오·설정 | cross-origin 탈취 | 개발 환경은 vite proxy 로 처리, 백엔드는 `app.use(cors())` 기본값. **운영 배포 시 whitelisting 필요** | `index.js` |
+
+### 8.2 전역 예외 처리 전략
+
+#### Backend
+
+- 모든 라우트 핸들러는 `try { ... } catch (err) { console.error(...); res.status(500).json({ error: 'Internal server error.' }); }` 패턴을 따릅니다. → 스택은 **서버 로그에만**, 클라이언트에는 일반 메시지만.
+- 트랜잭션 안에서 throw 된 Error 에 `.status` 숫자 필드를 붙이면 상위 catch 에서 해당 HTTP 코드로 translate 합니다 (e.g. `400`, `404`). 그 외 에러는 500 으로 떨어집니다.
+- 라우트 뒤에 붙는 **전역 에러 핸들러**(`(err, req, res, next) => {...}`) 가 비동기 throw 까지 캐치하는 최종 safety net 입니다.
+- **404 핸들러**는 모든 라우트 뒤에 위치. `{ error: "Route <METHOD> <PATH> not found." }` 로 응답.
+
+#### Frontend / Admin
+
+- `utils/api.js` 의 fetch wrapper 가 non-2xx 응답에서 `Error` 를 throw 하되, `error.status` 와 `error.data` 속성에 응답 원문을 실어 보냅니다. 호출하는 페이지는 `try/catch` 로 받아 UI 배너에 `error.message` 를 출력합니다.
+- Admin 패널의 api wrapper 는 `401` 응답을 가로채 `admin_token` / `admin_user` 를 로컬 스토리지에서 삭제하고 `/` 로 강제 리다이렉트합니다. 세션 만료 시 사용자가 혼란스러운 상태에 머물지 않도록.
+- React 페이지는 `loading` · `error` · `success` 세 상태를 명시적으로 관리하며, 비동기 작업 전후에 각 플래그를 set 합니다.
+- Google Sign-In 버튼은 자체적으로 `ready` / `missing-config` / `error` 상태를 갖고 있어, 부모 페이지는 GIS 스크립트 로드 실패까지 일일이 처리할 필요가 없습니다.
+
+### 8.3 알려진 한계 / 운영 전 체크리스트
+
+- [ ] **`JWT_SECRET` 환경변수 설정** (개발 fallback 을 운영에 쓰면 토큰 위조 가능)
+- [ ] **`GOOGLE_CLIENT_ID` / `VITE_GOOGLE_CLIENT_ID` 설정** (Google Sign-In 필요 시)
+- [ ] **CORS origin whitelist 축소** (현재 `cors()` 기본 = 모두 허용)
+- [ ] **HTTPS 종단 설정** (리버스 프록시 또는 Node 직접)
+- [ ] **sql.js → better-sqlite3 마이그레이션 검토** (고동시성/대용량 시 saveDb 비용 과도)
+- [ ] **로그 수집** (현재는 `console.error` / `console.log` 만)
+- [ ] **레이트 리미팅 / 봇 방어** (현재 미설정, `/auth/login` 브루트 포스 방어 필요)
+- [ ] **프로모션 할인 로직 연결** (현재 `promotions` 테이블은 존재하지만 예약 생성 시 참조되지 않음)
+- [ ] **실 결제 게이트웨이 연동** (Stripe/Alipay 등 실제 결제는 미구현 — 현재 `payments.status='pending'` 상태로만 관리)
 
 ---
 
