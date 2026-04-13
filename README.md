@@ -563,7 +563,99 @@ erDiagram
 
 ## 6. API 명세서
 
-<!-- TODO:SECTION-6 -->
+### 공통 규약
+
+- **Base URL (dev)**: `http://localhost:4000/api`
+- **요청/응답 바디**: JSON (`Content-Type: application/json`). 파일 업로드만 `multipart/form-data`.
+- **필드 네이밍**: 요청 바디 · 쿼리 · 응답 전부 `snake_case`.
+- **인증**: `Authorization: Bearer <JWT>` 헤더. JWT 는 `/api/auth/login`, `/api/auth/register`, `/api/auth/google` 에서 발급되며 HS256 · 7일 만료.
+- **에러 응답 shape**: `{ "error": "<message>" }` 로 통일. HTTP status 로 분류.
+- **공통 에러 코드**:
+  - `400` 필수 필드 누락 / 값 검증 실패 / 날짜 범위 오류
+  - `401` 인증 실패 / 토큰 만료 / 사용자 없음
+  - `403` 인증됐으나 권한 부족 (admin 이 아님 / 예약 소유자가 아님)
+  - `404` 리소스 없음
+  - `409` 충돌 (예: 이미 등록된 이메일)
+  - `500` 내부 에러 (console 에만 스택 남김)
+  - `503` 기능 비활성화 (예: `GOOGLE_CLIENT_ID` 미설정)
+
+---
+
+### 6.1 인증 · 사용자 `/api/auth`
+
+| Method | Path | Auth | Body / Query | 응답 (주요) |
+|---|---|---|---|---|
+| `POST` | `/register` | — | `{ name, email, password, phone?, nationality?, language? }` | `201 { message, token, user }` · `400` 검증 실패 · `409` 이미 등록 |
+| `POST` | `/login` | — | `{ email, password }` | `200 { message, token, user }` · `401` 자격 실패 |
+| `POST` | `/google` | — | `{ credential }` (Google ID token) | `200 { message, token, user }` · `400` credential 누락 · `401` 검증 실패/미검증 이메일 · `503` `GOOGLE_CLIENT_ID` 미설정 |
+| `GET` | `/me` | 필요 | — | `200 { user }` · `401` |
+| `PUT` | `/me` | 필요 | `{ name?, phone?, nationality?, language? }` | `200 { message, user }` · `400` 업데이트할 필드 없음 |
+
+> **Google Sign-In 동작 규칙**: 같은 이메일의 기존 비밀번호 계정이 있으면 **동일 행에 `google_id` 를 붙여 연결**합니다. 새 계정일 때는 password 컬럼에 `crypto.randomBytes(32)` 기반 bcrypt 해시를 저장해 비밀번호 로그인이 원천 불가하도록 만듭니다.
+
+---
+
+### 6.2 호텔 `/api/hotels`
+
+| Method | Path | Auth | Query | 응답 |
+|---|---|---|---|---|
+| `GET` | `/` | — | `search?` | `200 { hotels: [...] }` (amenities JSON 파싱, `is_featured DESC, sort_order ASC, rating DESC` 정렬) |
+| `GET` | `/:id` | — | — | `200 { hotel, room_types }` · `404` 없음 |
+| `GET` | `/:id/availability` | — | `check_in`, `check_out` (YYYY-MM-DD, 필수) | `200 { hotel, check_in, check_out, availability: [ { room_type, dates: [...], min_available, total_price, nights, is_available } ] }` · `400` 날짜 누락 · `404` |
+
+### 6.3 티켓 `/api/tickets`
+
+| Method | Path | Auth | Query | 응답 |
+|---|---|---|---|---|
+| `GET` | `/` | — | `category?`, `search?` | `200 { tickets: [...] }` |
+| `GET` | `/:id` | — | — | `200 { ticket }` · `404` |
+| `GET` | `/:id/availability` | — | `date` (YYYY-MM-DD) | `200 { ticket, date, available, price }` · `400` / `404` |
+
+### 6.4 패키지 `/api/packages`
+
+| Method | Path | Auth | Query | 응답 |
+|---|---|---|---|---|
+| `GET` | `/` | — | `search?` | `200 { packages: [...] }` (includes JSON 파싱) |
+| `GET` | `/:id` | — | — | `200 { package, items }` (items 는 PACKAGE_ITEMS 행 + 상품 요약) · `404` |
+| `GET` | `/:id/availability` | — | `date` (YYYY-MM-DD) | `200 { package, date, available, price }` · `400` / `404` |
+
+---
+
+### 6.5 예약 `/api/bookings`
+
+| Method | Path | Auth | Body / Query | 응답 |
+|---|---|---|---|---|
+| `POST` | `/` | 선택 (게스트 허용) | `{ guest_name, guest_email, guest_phone?, product_type, product_id, room_type_id?, check_in?, check_out?, visit_date?, guests?, quantity?, special_requests? }` | `201 { message, booking, voucher }` · `400` 검증/가용성 실패 · `404` 상품 없음 · `500` |
+| `GET` | `/lookup` | — | `booking_number?`, `email?`, `phone?` | `200 { bookings: [{ ...booking, voucher }] }` · `400` 검색 키 부족 |
+| `GET` | `/my` | **필요** | — | `200 { bookings: [...] }` (로그인 사용자 본인 예약만) |
+| `GET` | `/:id` | 부분 | `guest_email?` (게스트 소유 증명) | `200 { booking, voucher, payment, product, room_type }` · `403` 소유권 실패 · `404` |
+| `PUT` | `/:id/cancel` | 부분 | body: `{ guest_email? }` | `200 { message, booking }` · `400` 이미 취소 · `403` 소유권 실패 · `404` |
+
+#### 예약 생성 트랜잭션 순서 (`POST /`)
+
+1. 필수 필드 / product_type enum 검증 → 실패 시 `400`
+2. `tryGetUserId(req)` 로 로그인 사용자면 `user_id` 확정, 아니면 `NULL`
+3. `db.transaction(() => { ... })()` 시작
+4. product_type 별 분기:
+   - **hotel**: 날짜 루프 돌며 각 야간의 `room_inventory` 조회/검증 → `booked_rooms` 증가 + 단가 누적
+   - **ticket / package**: 해당 날짜의 `*_inventory` 한 건 조회/검증 → `booked_quantity` 증가
+5. `bookings` INSERT → id 획득
+6. `payments` INSERT (`status='pending'`)
+7. `vouchers` INSERT (`code`, `qr_data` JSON)
+8. COMMIT → `saveDb()` 가 `high1.db` 재직렬화
+9. `201 { booking, voucher }` 응답
+
+> 중간 어느 단계든 에러를 throw 하면 트랜잭션 전체가 ROLLBACK 되어 인벤토리 변경이 되돌려집니다. 에러에 `.status` 필드를 붙이면 호출부에서 해당 HTTP 코드로 번역됩니다.
+
+#### 소유권 검증 (`GET /:id` / `PUT /:id/cancel`)
+
+셋 중 하나만 충족되면 통과:
+
+1. 인증된 사용자의 `id` 가 `booking.user_id` 와 일치
+2. 인증된 사용자의 `role === 'admin'`
+3. 요청 body/query 의 `guest_email` 이 DB 의 `guest_email` 과 대소문자 무시 일치
+
+`1` · `2` 는 로그인 플로우, `3` 은 게스트 예약의 "예약 번호 + 이메일" 재조회 UX 를 지원합니다.
 
 ---
 
