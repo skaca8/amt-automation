@@ -294,14 +294,26 @@ export default function BookingPage() {
   const [error, setError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
+  // 백엔드 /availability 엔드포인트에서 가져오는 "정식 가격 견적".
+  //   - hotel: { total, perNight, nights }  (객실 1개 기준 per-date 합)
+  //   - ticket/package: { total, perUnit }  (1매 기준 per-date 가격)
+  // 이 값이 세팅되면 calculateTotal 은 이 값을 우선 사용한다. /availability
+  // 가 실패하면 null 로 남겨 두고 base_price 기반 fallback 이 화면을 채운다.
+  // 실제 결제 금액은 어쨌든 backend 가 POST /bookings 에서 최종 산출한다.
+  const [quote, setQuote] = useState(null)
 
   // URL 쿼리에서 상세 페이지가 넘겨 준 예약 컨텍스트를 꺼낸다.
-  // 호텔: checkIn/checkOut/roomType, 티켓·패키지: date/quantity.
+  // 호텔: checkIn/checkOut/roomType/rooms, 티켓·패키지: date/quantity.
   const checkIn = searchParams.get('checkIn') || ''
   const checkOut = searchParams.get('checkOut') || ''
   const roomTypeId = searchParams.get('roomType') || ''
   const visitDate = searchParams.get('date') || ''
-  const quantity = parseInt(searchParams.get('quantity') || '1', 10)
+  const quantity = Math.max(1, parseInt(searchParams.get('quantity') || '1', 10) || 1)
+  // 호텔 예약용 객실 수. 기존 URL 스킴에서는 'rooms' 파라미터가 넘어오는데,
+  // 호환성을 위해 'quantity' 가 넘어온 경우에도 그 값을 객실 수로 간주한다.
+  // 백엔드 bookings 테이블의 quantity 컬럼이 호텔에서는 "객실 수" 의미이기
+  // 때문이다. 타입 변환이 실패하거나 음수가 들어오면 최소 1 로 정규화.
+  const hotelRooms = Math.max(1, parseInt(searchParams.get('rooms') || searchParams.get('quantity') || '1', 10) || 1)
 
   const [form, setForm] = useState({
     name: '',
@@ -365,6 +377,82 @@ export default function BookingPage() {
   }, [type, id])
 
   // --------------------------------------------------------------------------
+  // 정식 가격 견적 fetch (/availability)
+  // --------------------------------------------------------------------------
+  //
+  // 왜 이 effect 가 필요한가:
+  //   backend POST /bookings 는 예약 생성 시 room_inventory / ticket_inventory
+  //   / package_inventory 의 per-date `price` 오버라이드를 사용해 최종 금액을
+  //   계산한다 (날짜별 성수기/주말 가격 등). 반면 상품 detail 엔드포인트는
+  //   정적인 base_price 만 돌려주므로, 그 값만 쓰면 화면에 표시된 총액과
+  //   실제 결제 금액이 달라질 수 있다.
+  //
+  //   그래서 이 effect 가 /availability 를 호출해 "backend 가 청구할 것과
+  //   동일한" 단가/총액을 가져와 quote state 에 저장한다. calculateTotal 은
+  //   quote 가 있으면 그 값을 그대로 쓰고, 없을 때에만 base_price fallback
+  //   으로 화면을 채운다.
+  //
+  // 실패 처리:
+  //   availability 가 404/400 등을 던지면 quote 는 null 로 남기고 fallback
+  //   계산으로 표시한다. 최종 청구는 backend 가 POST /bookings 에서
+  //   트랜잭션 안에서 재계산하므로 사용자가 결제 전에 비정상 값을 보는
+  //   일은 여전히 예외적인 상황에 한정된다.
+  useEffect(() => {
+    if (!product) return
+    // 각 상품 유형별 필수 조건이 채워져야만 availability 를 쿼리한다.
+    if (type === 'hotel' && (!checkIn || !checkOut)) { setQuote(null); return }
+    if ((type === 'ticket' || type === 'package') && !visitDate) { setQuote(null); return }
+
+    let cancelled = false
+    const fetchQuote = async () => {
+      try {
+        if (type === 'hotel') {
+          const qs = new URLSearchParams({ check_in: checkIn, check_out: checkOut }).toString()
+          const data = await get(`/hotels/${id}/availability?${qs}`)
+          // 응답 shape: { availability: [{ room_type: {...}, dates: [...],
+          //              total_price, nights, min_available, is_available }] }
+          // 객실 1개 기준의 total_price / nights 가 반환된다. hotelRooms 와
+          // 곱해 전체 객실 수 기준 최종 총액을 만든다.
+          const list = Array.isArray(data.availability) ? data.availability : []
+          const rtAvail =
+            list.find(a => String(a.room_type && a.room_type.id) === String(roomTypeId)) ||
+            list[0] ||
+            null
+          if (cancelled) return
+          if (!rtAvail) { setQuote(null); return }
+          const perRoom = Number(rtAvail.total_price) || 0
+          const nights = Number(rtAvail.nights) || 0
+          setQuote({
+            total: perRoom * hotelRooms,
+            perRoom,                                       // 1 객실 기준 전체 박수 합계
+            perNight: nights > 0 ? perRoom / nights : 0,   // 객실당 1박 평균 단가
+            nights,
+          })
+        } else if (type === 'ticket') {
+          const data = await get(`/tickets/${id}/availability?date=${encodeURIComponent(visitDate)}`)
+          // 응답 shape: { ticket: {...}, date, available, price, is_available }
+          const unit = Number(data.price) || 0
+          if (cancelled) return
+          setQuote({ total: unit * quantity, perUnit: unit })
+        } else if (type === 'package') {
+          const data = await get(`/packages/${id}/availability?date=${encodeURIComponent(visitDate)}`)
+          const unit = Number(data.price) || 0
+          if (cancelled) return
+          setQuote({ total: unit * quantity, perUnit: unit })
+        }
+      } catch (err) {
+        // availability 엔드포인트가 실패해도 페이지 전체를 깨지 않는다.
+        // 사용자는 base_price 기반 fallback 총액을 보게 되고, 실제 결제는
+        // backend 가 POST /bookings 시점에 다시 계산한다.
+        if (!cancelled) setQuote(null)
+        console.error('Failed to fetch price quote from /availability:', err)
+      }
+    }
+    fetchQuote()
+    return () => { cancelled = true }
+  }, [product, type, id, checkIn, checkOut, visitDate, roomTypeId, quantity, hotelRooms])
+
+  // --------------------------------------------------------------------------
   // 파생 값 계산 헬퍼
   // --------------------------------------------------------------------------
 
@@ -384,11 +472,24 @@ export default function BookingPage() {
 
   /**
    * 총액 계산.
-   * - 호텔: 선택된 객실 단가 × 박수.
-   * - 티켓/패키지: 단가 × quantity.
-   * - 그 외: 단가 하나 그대로.
+   *
+   * 우선순위:
+   *   1. quote.total (backend /availability 에서 받은 정식 합계) — 있으면 무조건 이것.
+   *   2. base_price 기반 fallback — availability 가 아직 로드되지 않았거나
+   *      해당 상품에 availability 가 없는 예외적 상황용.
+   *
+   * fallback 규칙:
+   *   - 호텔: roomPrice × nights × hotelRooms
+   *   - 티켓/패키지: base_price × quantity
+   *   - 그 외: base_price 그대로
+   *
+   * ※ fallback 은 per-date inventory 가격 오버라이드를 반영하지 못하므로
+   *   정확하지 않다. 실제 결제 금액은 backend 가 POST /bookings 의
+   *   트랜잭션 안에서 재계산하므로 최종 청구액은 항상 올바르다.
    */
   const calculateTotal = () => {
+    if (quote && typeof quote.total === 'number') return quote.total
+
     if (!product) return 0
 
     if (type === 'hotel') {
@@ -398,15 +499,35 @@ export default function BookingPage() {
       if (checkIn && checkOut) {
         // 체크인/아웃 차이를 일수로 환산. Math.ceil 로 부분일도 1박 처리.
         const nights = Math.max(1, Math.ceil((new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24)))
-        return roomPrice * nights
+        // 객실 수(hotelRooms) 곱셈을 반드시 포함 — backend 도 qty 로 곱한다.
+        return roomPrice * nights * hotelRooms
       }
-      return roomPrice
+      return roomPrice * hotelRooms
     }
 
     if (type === 'ticket' || type === 'package') {
       return readBasePrice(product) * quantity
     }
 
+    return readBasePrice(product)
+  }
+
+  /**
+   * 1박당 객실 단가(표시용). quote 가 있으면 quote.perNight 를 그대로 쓰고,
+   * 없으면 정적 base_price 로 fallback. Summary 카드의 "Room Rate" 행에서 사용.
+   */
+  const getPerNightRate = () => {
+    if (quote && typeof quote.perNight === 'number' && quote.perNight > 0) return quote.perNight
+    const room = getSelectedRoom()
+    return room ? readBasePrice(room) : readBasePrice(product)
+  }
+
+  /**
+   * 티켓/패키지의 1매당 단가(표시용). quote 가 있으면 quote.perUnit,
+   * 없으면 상품의 base_price.
+   */
+  const getPerUnitPrice = () => {
+    if (quote && typeof quote.perUnit === 'number' && quote.perUnit > 0) return quote.perUnit
     return readBasePrice(product)
   }
 
@@ -460,11 +581,18 @@ export default function BookingPage() {
         special_requests: form.specialRequests || null,
       }
 
-      // 상품 유형별 추가 필드. 호텔은 체크인/아웃/객실, 티켓·패키지는 날짜/수량.
+      // 상품 유형별 추가 필드. 호텔은 체크인/아웃/객실/객실수, 티켓·패키지는 날짜/수량.
       if (type === 'hotel') {
         bookingData.check_in = checkIn
         bookingData.check_out = checkOut
         if (roomTypeId) bookingData.room_type_id = Number(roomTypeId)
+        // ★ 핵심 수정: 호텔에도 quantity(=객실 수)를 반드시 실어 보낸다.
+        //   이전에는 이 필드가 빠져 backend 가 항상 qty=1 로 가정하고
+        //   1박 × 1객실만 과금하던 버그가 있었다. bookings 테이블의
+        //   quantity 컬럼은 호텔에서 "객실 수" 의미이며, 총액 계산식은
+        //   POST /bookings 에서 `totalPrice += nightPrice * qty` 로
+        //   매 night 에 곱해진다.
+        bookingData.quantity = hotelRooms
       } else if (type === 'ticket') {
         bookingData.visit_date = visitDate
         bookingData.quantity = quantity
@@ -632,6 +760,14 @@ export default function BookingPage() {
                   <span style={styles.summaryLabel}>{t('booking.nights')}</span>
                   <span style={styles.summaryValue}>{getNights()} {t('common.night')}</span>
                 </div>
+                {/* 객실 수 표시. 1개일 때도 줄을 노출해 사용자가 "내가 지금
+                    몇 개 방을 잡고 있는지" 를 즉시 인지할 수 있게 한다. */}
+                <div style={styles.summaryRow}>
+                  <span style={styles.summaryLabel}>{t('hotel.rooms')}</span>
+                  <span style={styles.summaryValue}>
+                    {hotelRooms} {hotelRooms === 1 ? t('common.room') : t('common.rooms')}
+                  </span>
+                </div>
               </>
             )}
 
@@ -670,7 +806,9 @@ export default function BookingPage() {
                 <div style={styles.summaryRow}>
                   <span style={styles.summaryLabel}>{t('booking.unitPrice')}</span>
                   <span style={styles.summaryValue}>
-                    {'\u20A9'}{readBasePrice(product).toLocaleString()} / {t('common.person')}
+                    {/* 가능한 경우 /availability 에서 받은 per-date 단가(quote.perUnit)를
+                        사용하고, 없으면 상품의 base_price 로 fallback. */}
+                    {'\u20A9'}{getPerUnitPrice().toLocaleString()} / {t('common.person')}
                   </span>
                 </div>
                 {quantity > 1 && (
@@ -689,13 +827,19 @@ export default function BookingPage() {
                 <div style={styles.summaryRow}>
                   <span style={styles.summaryLabel}>{t('booking.roomRate')}</span>
                   <span style={styles.summaryValue}>
-                    {'\u20A9'}{(getSelectedRoom() ? readBasePrice(getSelectedRoom()) : readBasePrice(product)).toLocaleString()}{' '}
+                    {/* 1박당 객실 단가는 가능한 경우 quote.perNight (per-date 평균)
+                        를 쓰고, 없을 때만 정적 base_price 로 fallback. */}
+                    {'\u20A9'}{Math.round(getPerNightRate()).toLocaleString()}{' '}
                     / {t('hotel.perNight')}
                   </span>
                 </div>
                 <div style={styles.summaryRow}>
                   <span style={styles.summaryLabel}>
+                    {/* N박 × M객실 전체 곱셈을 사용자에게 명시적으로 드러낸다.
+                        "1박 × 1객실" 케이스에서도 혼란을 줄이기 위해 동일 포맷. */}
                     {getNights()} {getNights() > 1 ? t('common.nights') : t('common.night')}
+                    {' \u00D7 '}
+                    {hotelRooms} {hotelRooms === 1 ? t('common.room') : t('common.rooms')}
                   </span>
                   <span style={styles.summaryValue}>{'\u20A9'}{total.toLocaleString()}</span>
                 </div>
