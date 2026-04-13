@@ -650,7 +650,7 @@ erDiagram
 
 | Method | Path | Auth | Body / Query | 응답 |
 |---|---|---|---|---|
-| `POST` | `/` | 선택 (게스트 허용) | `{ guest_name, guest_email, guest_phone?, product_type, product_id, room_type_id?, check_in?, check_out?, visit_date?, guests?, quantity?, special_requests? }` | `201 { message, booking, voucher }` · `400` 검증/가용성 실패 · `404` 상품 없음 · `500` |
+| `POST` | `/` | 선택 (게스트 허용, **restricted 상품은 필수**) | `{ guest_name, guest_email, guest_phone?, product_type, product_id, room_type_id?, check_in?, check_out?, visit_date?, guests?, quantity?, special_requests?, access_code? }` | `201 { message, booking, voucher }` · `400` 검증/가용성 실패 · `401` restricted 상품인데 미인증 · `403` access_code 누락/무효/만료/exhausted/revoked/유저 불일치/상품 불일치 · `404` 상품 없음 · `500` |
 | `GET` | `/lookup` | — | `booking_number?`, `email?`, `phone?` | `200 { bookings: [{ ...booking, voucher }] }` · `400` 검색 키 부족 |
 | `GET` | `/my` | **필요** | — | `200 { bookings: [...] }` (로그인 사용자 본인 예약만) |
 | `GET` | `/:id` | 부분 | `guest_email?` (게스트 소유 증명) | `200 { booking, voucher, payment, product, room_type }` · `403` 소유권 실패 · `404` |
@@ -661,14 +661,21 @@ erDiagram
 1. 필수 필드 / product_type enum 검증 → 실패 시 `400`
 2. `tryGetUserId(req)` 로 로그인 사용자면 `user_id` 확정, 아니면 `NULL`
 3. `db.transaction(() => { ... })()` 시작
-4. product_type 별 분기:
+4. **구매 게이트 체크** (`readProductRestriction` + `validateAndConsumeAccessCode`):
+   - 상품 테이블에서 `is_restricted` 플래그 조회 → 존재하지 않는 상품은 `404` throw
+   - `is_restricted=1` 인 경우 body 의 `access_code` 를 검증:
+     - 미인증이면 `401` throw
+     - 코드 row lookup 후 `revoked` / `exhausted` / 유저 불일치 / 상품 불일치 / 만료 → `403` throw
+     - 통과 시 원자적으로 `current_uses += 1`, 필요시 `status='exhausted'` 로 전이, `access_codes.id` 를 `accessCodeId` 로 기억
+   - `is_restricted=0` 이면 `access_code` 가 와도 silent ignore
+5. product_type 별 분기:
    - **hotel**: 날짜 루프 돌며 각 야간의 `room_inventory` 조회/검증 → `booked_rooms` 증가 + 단가 누적
    - **ticket / package**: 해당 날짜의 `*_inventory` 한 건 조회/검증 → `booked_quantity` 증가
-5. `bookings` INSERT → id 획득
-6. `payments` INSERT (`status='pending'`)
-7. `vouchers` INSERT (`code`, `qr_data` JSON)
-8. COMMIT → `saveDb()` 가 `high1.db` 재직렬화
-9. `201 { booking, voucher }` 응답
+6. `bookings` INSERT (`access_code_id` 컬럼 포함) → id 획득
+7. `payments` INSERT (`status='pending'`)
+8. `vouchers` INSERT (`code`, `qr_data` JSON)
+9. COMMIT → `saveDb()` 가 `high1.db` 재직렬화
+10. `201 { booking, voucher }` 응답
 
 > 중간 어느 단계든 에러를 throw 하면 트랜잭션 전체가 ROLLBACK 되어 인벤토리 변경이 되돌려집니다. 에러에 `.status` 필드를 붙이면 호출부에서 해당 HTTP 코드로 번역됩니다.
 
@@ -761,6 +768,24 @@ erDiagram
 - multer 디스크 스토리지. 파일명은 `<timestamp>-<random>.<ext>`.
 - **제한**: 단일 파일 10MB, MIME 화이트리스트 `jpeg | jpg | png | gif | webp`.
 - 저장 경로: `backend/uploads/` (git ignore), 정적 서빙은 `GET /uploads/<filename>`.
+
+#### 6.6.8 구매 게이트 코드 `/api/admin/access-codes`
+
+관리자가 "특정 유저 × 특정 상품" 에 대한 예약 권한을 발급/관리하는 엔드포인트. 고객은 이 코드를 외부 채널(이메일·채팅)로 받아 `POST /api/bookings` 의 `access_code` 필드에 실어 보낸다. 자세한 트랜잭션 흐름은 §7.3.
+
+| Method | Path | Body / Query | 응답 · 동작 |
+|---|---|---|---|
+| `GET` | `/` | `user_id?`, `product_type?`, `product_id?`, `status?`, `search?`, `page?`, `limit?` | `200 { access_codes: [{ ...row, user_email, user_name }], pagination }`. `product_type` 필터는 `['hotel','ticket','package']` allow-list. |
+| `POST` | `/` | `{ user_id, product_type, product_id, max_uses?, valid_until?, note? }` | `201 { message, access_code, product_is_restricted }`. 코드 문자열은 서버가 `ACG-XXXXXXXXXXXX` 포맷으로 생성. `max_uses` 기본 1. 대상 유저/상품 부재 시 `404`. `product_is_restricted` 가 `false` 로 돌아오면 관리자가 아직 상품을 restricted 로 전환하지 않았다는 힌트 (코드 효력 없음 — UI 가 경고 배너 노출). |
+| `GET` | `/:id` | — | `200 { access_code: { ... + user_email, user_name, issued_by_email }, redemptions: [{ booking_id, booking_number, status, created_at, check_in, check_out, visit_date, total_price, quantity }] }`. redemptions 는 `bookings.access_code_id` 로 역조회 — cancelled 포함. |
+| `PUT` | `/:id` | `{ note?, max_uses?, valid_until?, status? }` | `200 { message, access_code }`. 수정 가능: 메모·최대사용수·만료일·status. `status` 는 `['active','revoked']` allow-list (`'exhausted'` 는 derived 상태라 admin 이 직접 못 씀). `max_uses < current_uses` 는 `400`. 수정 불가: `code`, `user_id`, `product_type`, `product_id`, `current_uses`, `issued_by`, `issued_at`. |
+| `DELETE` | `/:id` | — | `200 { message, access_code }`. Soft revoke — `status='revoked'`. row 는 남긴다(감사/이력). 멱등 — 재호출해도 200. |
+
+##### 코드 소비 / 롤백 수명주기
+
+- **소비** (`POST /api/bookings`): `validateAndConsumeAccessCode` 가 트랜잭션 안에서 `current_uses += 1`, 한도 도달 시 `status='exhausted'`. 원자적 `UPDATE` 한 문장.
+- **롤백** (`PUT /api/bookings/:id/cancel`, `PUT /api/admin/bookings/:id/status → cancelled|refunded`, `POST /api/admin/bookings/:id/refund`): `restoreAccessCodeUsage` 가 `current_uses = MAX(0, n-1)` 로 감소. `'exhausted' → 'active'` 로 전이. `'revoked'` 는 admin manual override 우선 원칙에 따라 건드리지 않는다.
+- **double-rollback 방지**: admin 경로는 `wasReleased` 플래그(기존 status 가 이미 cancelled/refunded 인지)를 체크해 재취소 시 두 번 감소하지 않는다.
 
 ---
 
