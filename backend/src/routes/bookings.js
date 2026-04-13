@@ -109,6 +109,169 @@ function restoreBookingInventory(db, booking) {
   }
 }
 
+// product_type → 실제 테이블 이름 매핑. access-code 게이트 체크에서
+// 각 상품 테이블의 is_restricted 컬럼을 한 줄로 조회하기 위해 사용한다.
+// routes/admin/products.js 의 PRODUCT_TABLES 와 동일한 allow-list.
+const PRODUCT_TABLES = {
+  hotel: 'hotels',
+  ticket: 'tickets',
+  package: 'packages',
+};
+
+/**
+ * 상품의 is_restricted 플래그를 읽는다.
+ *
+ * 반환: { exists: boolean, is_restricted: boolean }
+ *
+ * 존재하지 않는 상품이면 { exists: false } 를 돌려줘, 호출 측이 404 로
+ * 변환하도록 한다. PRODUCT_TABLES 의 value 는 서버 상수이므로 동적
+ * 테이블 이름이 SQL 에 들어가도 안전.
+ */
+function readProductRestriction(db, productType, productId) {
+  const table = PRODUCT_TABLES[productType];
+  if (!table) return { exists: false, is_restricted: false };
+  const row = db.prepare(
+    `SELECT is_restricted FROM ${table} WHERE id = ?`
+  ).get(productId);
+  if (!row) return { exists: false, is_restricted: false };
+  return { exists: true, is_restricted: row.is_restricted === 1 };
+}
+
+/**
+ * access_code 문자열을 받아 유효성을 검증하고 즉시 소비(current_uses++) 한다.
+ *
+ * 반드시 호출 측의 `db.transaction(() => { ... })` 안에서 실행해야 한다.
+ * 같은 트랜잭션에서 예약 INSERT 가 실패하면 여기서 증가시킨 current_uses
+ * 도 함께 롤백되어야 하기 때문.
+ *
+ * 검증 체인 (한 단계라도 실패하면 throw):
+ *   1) code 문자열 매칭 + status='active'      → 없으면 403 "Invalid code"
+ *   2) user_id 가 요청자 userId 와 일치          → 아니면 403 "not for you"
+ *   3) product_type / product_id 가 예약 대상과 동일 → 아니면 403 "wrong product"
+ *   4) valid_until 이 있고 지금보다 이전이면 expired → 403
+ *   5) current_uses < max_uses                    → 아니면 403 "exhausted"
+ *
+ * 통과 시:
+ *   - current_uses += 1
+ *   - 새 current_uses == max_uses 면 status='exhausted' 로 자동 전이
+ *   - 반환: access_codes.id (예약 INSERT 시 access_code_id 컬럼에 저장)
+ *
+ * throw 하는 Error 에는 `.status` 힌트를 붙여 라우트 catch 에서 그대로
+ * HTTP 응답 코드로 번역된다. (bookings.js 의 기존 트랜잭션 패턴과 동일.)
+ */
+function validateAndConsumeAccessCode(db, { code, userId, productType, productId }) {
+  if (!code) {
+    const err = new Error('Access code is required for this product.');
+    err.status = 403;
+    throw err;
+  }
+  if (!userId) {
+    // 구매 게이트는 로그인 유저에게만 허용. 게스트 예약 경로는 차단.
+    const err = new Error('Login required for this product.');
+    err.status = 401;
+    throw err;
+  }
+
+  // status 필터를 쿼리에 포함시키지 않고, 먼저 row 를 꺼낸 뒤 status 에
+  // 따라 정확한 에러 메시지를 돌려준다. 그래야 "exhausted" / "revoked"
+  // 를 "Invalid" 로 뭉뚱그리지 않고 원인별로 구분해 사용자에게 전달할 수
+  // 있다.
+  const row = db.prepare('SELECT * FROM access_codes WHERE code = ?').get(code);
+  if (!row) {
+    const err = new Error('Invalid access code.');
+    err.status = 403;
+    throw err;
+  }
+  if (row.status === 'revoked') {
+    const err = new Error('This access code has been revoked.');
+    err.status = 403;
+    throw err;
+  }
+  if (row.status === 'exhausted' || row.current_uses >= row.max_uses) {
+    const err = new Error('This access code has reached its usage limit.');
+    err.status = 403;
+    throw err;
+  }
+
+  if (row.user_id !== userId) {
+    // 다른 유저에게 발급된 코드를 누가 갖고 와서 시도한 경우.
+    const err = new Error('This access code is not valid for the current user.');
+    err.status = 403;
+    throw err;
+  }
+  if (row.product_type !== productType || Number(row.product_id) !== Number(productId)) {
+    // 코드는 특정 상품에 묶인다. 다른 상품 예약에 재활용 불가.
+    const err = new Error('This access code is not valid for the selected product.');
+    err.status = 403;
+    throw err;
+  }
+
+  if (row.valid_until) {
+    // 'YYYY-MM-DD' 혹은 ISO 문자열을 Date 로 파싱해 오늘과 비교.
+    // 파싱 실패 시 NaN 을 반환해 getTime 비교가 항상 true/false 가 되는
+    // 엣지케이스를 피하려고 Number.isFinite 로 한 번 더 방어.
+    const until = new Date(row.valid_until).getTime();
+    if (Number.isFinite(until) && until < Date.now()) {
+      const err = new Error('This access code has expired.');
+      err.status = 403;
+      throw err;
+    }
+  }
+
+  // (current_uses >= max_uses 체크는 이미 위의 "status === 'exhausted'
+  //  || current_uses >= max_uses" 에서 처리됐음. 여기까지 왔다는 건
+  //  still-bookable 이라는 뜻.)
+
+  // 소비 — UPDATE 로 카운터를 1 증가시키고, 한도에 도달했으면 status 도
+  // 'exhausted' 로 함께 전이한다. 원자적으로 하나의 UPDATE 문.
+  //
+  //   CASE current_uses + 1 >= max_uses THEN 'exhausted' ELSE 'active'
+  //
+  // sql.js 는 CASE 를 지원하므로 별도 재조회 없이 끝낼 수 있다.
+  db.prepare(`
+    UPDATE access_codes
+       SET current_uses = current_uses + 1,
+           status = CASE
+                      WHEN current_uses + 1 >= max_uses THEN 'exhausted'
+                      ELSE status
+                    END
+     WHERE id = ?
+  `).run(row.id);
+
+  return row.id;
+}
+
+/**
+ * 예약 취소/환불 경로에서 소비했던 access code 를 되돌린다.
+ *
+ * 입력: booking row (bookings 테이블의 한 행)
+ *
+ * 하는 일:
+ *   - booking.access_code_id 가 NULL 이면 아무 것도 안 한다.
+ *   - 값이 있으면 current_uses 를 MAX(0, current_uses - 1) 로 감소시키고,
+ *     이전에 'exhausted' 였던 경우 다시 'active' 로 복원한다.
+ *   - 이미 관리자가 'revoked' 시킨 코드는 status 를 건드리지 않는다
+ *     (revoked 는 manual override — 취소가 되돌릴 권한 없음).
+ *
+ * 반드시 호출 측의 트랜잭션 안에서 실행. admin/bookings.js 의 cancel /
+ * refund 경로가 이 함수를 재사용한다 (module.exports 로 노출).
+ */
+function restoreAccessCodeUsage(db, booking) {
+  if (!booking || !booking.access_code_id) return;
+  // current_uses 를 안전하게 감소 (음수 방지) + 한도 초과 해제 시 status 복원.
+  // 단, 관리자가 이미 'revoked' 시킨 코드는 그대로 둔다.
+  db.prepare(`
+    UPDATE access_codes
+       SET current_uses = MAX(0, current_uses - 1),
+           status = CASE
+                      WHEN status = 'revoked' THEN 'revoked'
+                      WHEN current_uses - 1 < max_uses THEN 'active'
+                      ELSE status
+                    END
+     WHERE id = ?
+  `).run(booking.access_code_id);
+}
+
 /**
  * Authorization 헤더에서 토큰을 선택적으로 디코드해 userId 를 꺼낸다.
  *
@@ -211,7 +374,10 @@ router.post('/', (req, res) => {
       visit_date,
       guests,
       quantity,
-      special_requests
+      special_requests,
+      // access_code: 구매 게이트용 토큰. is_restricted=1 상품이면 필수.
+      // is_restricted=0 상품에는 효력 없음 (silent ignore).
+      access_code,
     } = req.body;
 
     // DB 에 손대기 전에 공통 필수 필드 검증. product_type 별 추가 검증은
@@ -240,6 +406,38 @@ router.post('/', (req, res) => {
       created = db.transaction(() => {
         let totalPrice = 0;
         let nights = 1;
+        // 이 예약이 어떤 access_code 로 만들어졌는지 추적. is_restricted=1
+        // 상품을 예약할 때만 세팅되고, 그 외에는 NULL 로 bookings 에
+        // INSERT 된다. 예약 취소 시 이 id 를 보고 소비 카운터를 되돌린다.
+        let accessCodeId = null;
+
+        // ------------------------------------------------------------------
+        // Access-code 구매 게이트 체크
+        // ------------------------------------------------------------------
+        //
+        // 1) 상품 테이블에서 is_restricted 플래그를 한 번 읽는다.
+        // 2) restricted 면 access_code 가 필수 + 유효성 검증 + 소비.
+        //    - 로그인 필수 (userId 가 NULL 이면 401)
+        //    - 코드의 user_id 가 본인 id 와 일치해야 함
+        //    - 상품 matching, 유효기간, max_uses 체크
+        //    - 통과 시 current_uses += 1, 필요하면 status='exhausted'
+        //    - 실패하면 .status 힌트가 붙은 Error 를 throw → 전체 롤백
+        // 3) restricted 가 아니면 access_code 가 와도 silent ignore (쿠폰이
+        //    아니라 게이트이기 때문 — 실제로 필요 없을 때 소비하지 않는다).
+        const restriction = readProductRestriction(db, product_type, product_id);
+        if (!restriction.exists) {
+          const err = new Error('Product not found.');
+          err.status = 404;
+          throw err;
+        }
+        if (restriction.is_restricted) {
+          accessCodeId = validateAndConsumeAccessCode(db, {
+            code: access_code,
+            userId,
+            productType: product_type,
+            productId: product_id,
+          });
+        }
 
         if (product_type === 'hotel') {
           if (!room_type_id || !check_in || !check_out) {
@@ -352,13 +550,16 @@ router.post('/', (req, res) => {
         // INSERT 한다. 한 건이라도 실패하면 위의 인벤토리 감소까지 전부
         // 롤백된다.
         const insertResult = db.prepare(`
-          INSERT INTO bookings (booking_number, user_id, guest_name, guest_email, guest_phone, product_type, product_id, room_type_id, check_in, check_out, visit_date, guests, quantity, nights, total_price, special_requests)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO bookings (booking_number, user_id, guest_name, guest_email, guest_phone, product_type, product_id, room_type_id, check_in, check_out, visit_date, guests, quantity, nights, total_price, special_requests, access_code_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           bookingNumber, userId, guest_name, guest_email, guest_phone || null,
           product_type, product_id, room_type_id || null,
           check_in || null, check_out || null, visit_date || null,
-          guestCount, qty, nights, totalPrice, special_requests || null
+          guestCount, qty, nights, totalPrice, special_requests || null,
+          // access_code_id: restricted 상품이면 위의 validateAndConsume...
+          // 에서 받은 id, 아니면 NULL. 예약↔코드 역추적(취소 롤백, 감사) 용.
+          accessCodeId,
         );
 
         const bookingId = insertResult.lastInsertRowid;
@@ -586,11 +787,17 @@ router.put('/:id/cancel', (req, res) => {
       return res.status(400).json({ error: 'Booking is already cancelled.' });
     }
 
-    // 인벤토리 복원 → 예약 상태 변경 → 바우처 비활성을 한 트랜잭션에서
-    // 처리한다. 중간에 크래시가 나도 "인벤토리는 풀렸는데 예약은 아직
-    // confirmed" 같은 반쯤 취소된 상태가 생기지 않는다.
+    // 인벤토리 복원 → access code 사용 카운터 롤백 → 예약 상태 변경
+    // → 바우처 비활성을 한 트랜잭션에서 처리한다. 중간에 크래시가 나도
+    // "인벤토리는 풀렸는데 예약은 아직 confirmed" 같은 반쯤 취소된
+    // 상태가 생기지 않는다.
     const updated = db.transaction(() => {
       restoreBookingInventory(db, booking);
+      // booking.access_code_id 가 NULL 이 아니면(= restricted 상품을 코드로
+      // 예약했던 경우) 해당 access_code 의 current_uses 를 1 감소시키고
+      // 필요하면 'exhausted' → 'active' 로 상태를 복원한다. NULL 이면
+      // 함수 내부에서 no-op.
+      restoreAccessCodeUsage(db, booking);
       db.prepare("UPDATE bookings SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?").run(booking.id);
       db.prepare("UPDATE vouchers SET status = 'cancelled' WHERE booking_id = ?").run(booking.id);
       return db.prepare('SELECT * FROM bookings WHERE id = ?').get(booking.id);
@@ -608,3 +815,6 @@ module.exports = router;
 // 로직을 재사용할 수 있도록 함수 자체를 router 객체에 얹어 export 한다.
 // require('../bookings').restoreBookingInventory 로 꺼내 쓴다.
 module.exports.restoreBookingInventory = restoreBookingInventory;
+// access code 사용 카운터 롤백도 같은 이유로 admin 경로에서 공유한다.
+// admin cancel/refund 도 restricted 상품 취소 시 코드를 되돌려야 한다.
+module.exports.restoreAccessCodeUsage = restoreAccessCodeUsage;
