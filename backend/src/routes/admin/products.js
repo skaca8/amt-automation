@@ -52,19 +52,30 @@ const PRODUCT_TABLES = {
 };
 
 /**
- * PUT /featured — 상품의 featured 플래그 / sort_order 를 빠르게 토글.
+ * PUT /featured — 상품 목록/예약 관련 플래그를 빠르게 토글.
  *
- * Body: { product_type, product_id, is_featured?, sort_order? }
+ * Body: { product_type, product_id, is_featured?, sort_order?, is_restricted? }
  *
  * product_type 이 PRODUCT_TABLES 에 없으면 400. 이 allow-list 덕분에
  * 동적 table 문자열 삽입도 안전하다(사용자 입력이 직접 SQL 에 가지 않음).
+ *
+ * is_restricted 플래그는 access-code 구매 게이트 기능과 짝을 이룬다.
+ * 1 로 전이하면 이 상품은 "관리자가 발급한 access_code 가 있는 유저만
+ * 예약 가능" 상태가 되고, 목록/상세 페이지에서 🔒 배지로 표시된다.
+ * 노출 자체를 숨기진 않고 예약 액션만 차단한다 — "배지 달고 노출은 하되
+ * 예약만 막아" 는 정책에 따른다.
+ *
+ * 엔드포인트 경로 이름은 역사적으로 "featured" 이지만, 이제는 featured/
+ * sort_order/is_restricted 세 가지를 동시에 다루는 "상품 플래그 토글"
+ * 엔드포인트의 역할을 한다. 새 경로로 분리하지 않은 이유는 기존 관리자
+ * UI 가 이 경로 하나를 호출하고 있기 때문.
  *
  * 응답: 200 { message } | 400 유효성 | 500 내부 에러
  */
 router.put('/featured', (req, res) => {
   try {
     const db = getDb();
-    const { product_type, product_id, is_featured, sort_order } = req.body;
+    const { product_type, product_id, is_featured, sort_order, is_restricted } = req.body;
 
     if (!product_type || !product_id) {
       return res.status(400).json({ error: 'product_type and product_id are required.' });
@@ -80,8 +91,12 @@ router.put('/featured', (req, res) => {
     const updates = [];
     const values = [];
 
+    // 각 필드는 optional. undefined 면 무시(부분 업데이트 의미).
+    // 불리언은 모두 0/1 정수로 정규화한다 — SQLite 는 boolean 을
+    // INTEGER 로 저장하기 때문.
     if (is_featured !== undefined) { updates.push('is_featured = ?'); values.push(is_featured ? 1 : 0); }
     if (sort_order !== undefined) { updates.push('sort_order = ?'); values.push(sort_order); }
+    if (is_restricted !== undefined) { updates.push('is_restricted = ?'); values.push(is_restricted ? 1 : 0); }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update.' });
@@ -92,9 +107,9 @@ router.put('/featured', (req, res) => {
     // 안전하다 — 사용자 입력 문자열이 직접 쿼리에 들어가지 않는다.
     db.prepare(`UPDATE ${table} SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-    res.json({ message: 'Featured status updated.' });
+    res.json({ message: 'Product flags updated.' });
   } catch (err) {
-    console.error('Update featured error:', err);
+    console.error('Update product flags error:', err);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
@@ -174,7 +189,7 @@ router.put('/:id', (req, res) => {
       return res.status(404).json({ error: 'Hotel not found.' });
     }
 
-    const { name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, images, status, is_featured, sort_order } = req.body;
+    const { name_en, name_cn, description_en, description_cn, address, image_url, rating, amenities, images, status, is_featured, sort_order, is_restricted } = req.body;
 
     const updates = [];
     const values = [];
@@ -191,6 +206,10 @@ router.put('/:id', (req, res) => {
     if (status !== undefined) { updates.push('status = ?'); values.push(status); }
     if (is_featured !== undefined) { updates.push('is_featured = ?'); values.push(is_featured ? 1 : 0); }
     if (sort_order !== undefined) { updates.push('sort_order = ?'); values.push(sort_order); }
+    // is_restricted: 관리자가 "이 호텔은 access-code 가 있는 유저만 예약
+    // 가능" 으로 전환하는 구매 게이트 플래그. PUT /featured 와 동일하게
+    // 0/1 로 정규화.
+    if (is_restricted !== undefined) { updates.push('is_restricted = ?'); values.push(is_restricted ? 1 : 0); }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update.' });
@@ -431,7 +450,7 @@ router.put('/tickets/:id', (req, res) => {
       return res.status(404).json({ error: 'Ticket not found.' });
     }
 
-    const { name_en, name_cn, description_en, description_cn, category, image_url, images, base_price, duration, location, status, is_featured, sort_order } = req.body;
+    const { name_en, name_cn, description_en, description_cn, category, image_url, images, base_price, duration, location, status, is_featured, sort_order, is_restricted } = req.body;
 
     const updates = [];
     const values = [];
@@ -449,6 +468,9 @@ router.put('/tickets/:id', (req, res) => {
     if (status !== undefined) { updates.push('status = ?'); values.push(status); }
     if (is_featured !== undefined) { updates.push('is_featured = ?'); values.push(is_featured ? 1 : 0); }
     if (sort_order !== undefined) { updates.push('sort_order = ?'); values.push(sort_order); }
+    // is_restricted: access-code 게이트 플래그. hotel/ticket/package 모두
+    // 같은 이름의 컬럼을 쓰므로 같은 코드 패턴.
+    if (is_restricted !== undefined) { updates.push('is_restricted = ?'); values.push(is_restricted ? 1 : 0); }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update.' });
@@ -573,7 +595,7 @@ router.put('/packages/:id', (req, res) => {
       return res.status(404).json({ error: 'Package not found.' });
     }
 
-    const { name_en, name_cn, description_en, description_cn, image_url, images, base_price, includes, duration, status, items, is_featured, sort_order } = req.body;
+    const { name_en, name_cn, description_en, description_cn, image_url, images, base_price, includes, duration, status, items, is_featured, sort_order, is_restricted } = req.body;
 
     const updates = [];
     const values = [];
@@ -590,6 +612,8 @@ router.put('/packages/:id', (req, res) => {
     if (status !== undefined) { updates.push('status = ?'); values.push(status); }
     if (is_featured !== undefined) { updates.push('is_featured = ?'); values.push(is_featured ? 1 : 0); }
     if (sort_order !== undefined) { updates.push('sort_order = ?'); values.push(sort_order); }
+    // is_restricted: 3개 상품 테이블 공통 플래그. hotel/ticket 과 같은 정책.
+    if (is_restricted !== undefined) { updates.push('is_restricted = ?'); values.push(is_restricted ? 1 : 0); }
 
     if (updates.length > 0) {
       values.push(req.params.id);
