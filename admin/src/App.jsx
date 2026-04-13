@@ -36,6 +36,9 @@ import PackageManagement from './pages/PackageManagement'
 import UserManagement from './pages/UserManagement'
 import UserDetail from './pages/UserDetail'
 import PaymentManagement from './pages/PaymentManagement'
+// Access Codes — 특정 유저에게 특정 상품 구매 권한을 부여하는 ACG-XXXX
+// 토큰을 관리. 페이지 자체 헤더 주석에 설계 상세 있음.
+import AccessCodeManagement from './pages/AccessCodeManagement'
 import Settings from './pages/Settings'
 
 /**
@@ -129,6 +132,9 @@ export default function App() {
               <Route path="/users" element={<UserManagement />} />
               <Route path="/users/:id" element={<UserDetail />} />
               <Route path="/payments" element={<PaymentManagement />} />
+              {/* Access Codes — 구매 게이트 코드 발급/관리. 사이드바 메뉴의
+                  /access-codes 와 동일한 경로. */}
+              <Route path="/access-codes" element={<AccessCodeManagement />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
