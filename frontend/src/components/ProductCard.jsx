@@ -1,3 +1,25 @@
+// ============================================================================
+// ProductCard — 호텔/티켓/패키지 공용 카드
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - type prop('hotel' | 'ticket' | 'package') 하나로 세 상품 유형의 카드를
+//     렌더한다. 이미지, 배지, 제목/설명, 가격, 예약 버튼을 공통 레이아웃으로.
+//   - i18n 언어(en/cn)에 따라 name_en/name_cn, description_en/description_cn
+//     두 언어 필드 중 적절한 것을 고른다.
+//   - 호텔은 roomTypes 배열에서 최저 가격을 뽑아 "부터" 가격으로 보여 준다.
+//
+// 렌더 위치: Home / HotelList / TicketList / PackageList 등 리스트 페이지.
+//
+// 주의:
+//   - 백엔드 응답 shape 이 과거 camelCase, 현재 snake_case 두 가지를 섞어
+//     쓰던 히스토리가 있어, price/basePrice/base_price 등 여러 키를 안전하게
+//     fallback 으로 읽는다.
+//   - description 은 관리자가 HTML 로 입력한 경우가 있어, 카드에서는 태그를
+//     제거한 텍스트만 미리보기로 보여 준다(DOM 파서 사용).
+//   - 카드 클릭 → /{type}s/:id 로 navigate. onClick prop 이 주어지면 그걸
+//     우선 실행(Home 에서 커스텀 핸들러를 넘길 수 있게).
+// ============================================================================
+
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -168,6 +190,10 @@ const styles = {
   },
 }
 
+/**
+ * 백엔드가 images 를 배열, JSON 문자열, 또는 null 로 돌려줄 수 있어
+ * 안전하게 배열로 정규화한다. 잘못된 JSON 이면 빈 배열로 swallow.
+ */
 function parseImages(images) {
   if (!images) return []
   if (Array.isArray(images)) return images
@@ -177,11 +203,21 @@ function parseImages(images) {
   return []
 }
 
+/**
+ * 재사용 가능한 상품 카드.
+ *
+ * @param {object} props
+ * @param {'hotel'|'ticket'|'package'} props.type - 카드 유형
+ * @param {object} props.data - 상품 객체(백엔드 응답 그대로)
+ * @param {Function} [props.onClick] - 기본 navigate 대신 쓰고 싶을 때 주입
+ */
 export default function ProductCard({ type = 'hotel', data, onClick }) {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const lang = i18n.language || 'en'
 
+  // 카드 클릭. 커스텀 onClick 이 없으면 상세 페이지로 이동.
+  // URL 패턴은 /hotels/:id, /tickets/:id, /packages/:id.
   const handleClick = () => {
     if (onClick) {
       onClick(data)
@@ -190,6 +226,9 @@ export default function ProductCard({ type = 'hotel', data, onClick }) {
     }
   }
 
+  // 호텔은 객실 타입별 가격 중 최저가를 "부터(from)" 가격으로 쓴다.
+  // 티켓/패키지는 상품 자체에 단일 가격이 있다.
+  // 과거 camelCase 필드(basePrice) 와 현재 snake_case(base_price) 둘 다 지원.
   const getPrice = () => {
     if (type === 'hotel') {
       if (data.roomTypes && data.roomTypes.length > 0) {
@@ -207,11 +246,15 @@ export default function ProductCard({ type = 'hotel', data, onClick }) {
     return ''
   }
 
+  // 현재 언어에 맞춰 상품 이름 필드를 선택한다.
+  // 우선순위: lang 별 bilingual 필드 → legacy name/title → 'Untitled'.
   const getName = () => {
     if (lang === 'cn' || lang === 'zh') return data.name_cn || data.name_en || data.name || data.title || 'Untitled'
     return data.name_en || data.name || data.title || 'Untitled'
   }
 
+  // 설명도 bilingual 필드 우선. 관리자가 rich HTML 로 입력했을 수 있어,
+  // 카드 미리보기에서는 DOM 파서로 태그를 제거한 plain text 만 보여준다.
   const getDescription = () => {
     let desc
     if (lang === 'cn' || lang === 'zh') {
@@ -219,7 +262,7 @@ export default function ProductCard({ type = 'hotel', data, onClick }) {
     } else {
       desc = data.description_en || data.description || data.shortDescription || ''
     }
-    // Strip HTML tags for card preview
+    // 카드 미리보기를 위한 HTML 태그 제거.
     if (desc && typeof desc === 'string') {
       const tmp = document.createElement('div')
       tmp.innerHTML = desc
