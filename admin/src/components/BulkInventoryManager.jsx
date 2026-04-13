@@ -1,9 +1,50 @@
+// ============================================================================
+// Admin — 대량 재고 관리 컴포넌트 BulkInventoryManager
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) 상품(호텔 객실/티켓/패키지)에 대해 "날짜 범위 + 요일" 기반 대량 재고·
+//      가격 설정을 한 번에 수행한다. 백엔드의 bulk 엔드포인트를 호출한다.
+//   2) 설정된 재고 달력을 표로 조회하고, 각 행을 인라인 편집해 단일 날짜의
+//      가격·총량을 수정할 수 있다.
+//   3) 예약된 수량(booked) 대비 총량(total) 비율에 따라 행 배경색과
+//      상태 배지(Available/Filling/Sold Out/No Stock) 를 계산한다.
+//
+// productType: 'room' | 'ticket' | 'package'
+//   - room    : HotelManagement 의 객실 타입 상세에서 사용. 식별자는 room_type_id.
+//   - ticket  : TicketManagement 의 티켓 상세에서 사용. 식별자는 ticket_id.
+//   - package : PackageManagement 의 패키지 상세에서 사용. 식별자는 package_id.
+//
+// Props:
+//   - productType : 위 세 값 중 하나.
+//   - productId   : 대상 엔티티 id (room_type id / ticket id / package id).
+//   - onSave      : (선택) 저장 성공 시 부모에게 알려주는 콜백. 부모가 요약
+//                   패널(총 재고 등)을 refetch 할 때 사용한다.
+//
+// API 엔드포인트:
+//   GET  /admin/products/{type}-inventory/{productId}?from_date=&to_date=
+//   PUT  /admin/products/{type}-inventory            (단일 날짜 업데이트; 구버전)
+//   POST /admin/products/{type}-inventory/bulk        (범위 + 요일 대량 갱신)
+//
+// 주의:
+//   - 저장 실패 시 사용자에게 alert 로 에러를 노출한다. 상위 컴포넌트가 toast
+//     시스템을 갖추고 있지 않기 때문.
+//   - 응답 스키마가 프로젝트 초반과 후반에서 달라진 탓에, inventory 행의
+//     필드를 읽을 때 quantity / total_rooms / total_quantity 같은 여러 키를
+//     순차적으로 시도한다(fallback chain).
+//   - saveEdit 은 PUT 을 먼저 시도하고 실패하면 bulk POST 로 자동 폴백한다.
+// ============================================================================
+
 import React, { useState, useEffect, useCallback } from 'react'
 import { get, post, put } from '../utils/api'
 
+// 요일 라벨. 월 기준 0~6 인덱스. 한글/영어 동시 표기용.
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const DAY_KR = ['월', '화', '수', '목', '금', '토', '일']
 
+// ---------------------------------------------------------------------------
+// 날짜 유틸 — toISOString() 은 UTC 기준으로 찍혀 타임존이 틀어지는 경우가 있어
+// 로컬 year/month/day 를 수동으로 YYYY-MM-DD 로 만든다.
+// ---------------------------------------------------------------------------
 function formatDate(d) {
   const dt = new Date(d)
   const y = dt.getFullYear()
@@ -12,12 +53,14 @@ function formatDate(d) {
   return `${y}-${m}-${day}`
 }
 
+// 문자열 날짜 + N일. Date 인스턴스의 setDate 는 월/년 넘어감을 자동 처리한다.
 function addDays(dateStr, days) {
   const d = new Date(dateStr)
   d.setDate(d.getDate() + days)
   return formatDate(d)
 }
 
+// 오늘 날짜를 YYYY-MM-DD 로.
 function todayStr() {
   return formatDate(new Date())
 }
