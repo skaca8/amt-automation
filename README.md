@@ -221,7 +221,117 @@ sequenceDiagram
 
 ## 4. 디렉터리 구조 및 모듈화
 
-<!-- TODO:SECTION-4 -->
+### 4.1 리포지터리 레이아웃
+
+```
+amt-automation/
+├── README.md                 ← 이 문서 (아키텍처/ERD/API/DFD/보안)
+├── CLAUDE.md                 ← AI 코딩 어시스턴트용 리포 가이드
+├── GUIDE.md                  ← 한국어 end-user 실행 안내서
+├── start.sh                  ← 3개 앱 한 번에 기동
+├── stop.sh                   ← 3개 앱 kill
+├── start-windows.bat         ← Windows 등가
+│
+├── backend/                  ← Express API (port 4000)
+│   ├── package.json
+│   └── src/
+│       ├── index.js                 ← 부트스트랩 · 미들웨어 · 라우트 mount
+│       ├── config/
+│       │   └── database.js          ← sql.js 래퍼 + 스키마 + ALTER + transaction()
+│       ├── middleware/
+│       │   └── auth.js              ← authenticate · requireAdmin · JWT_SECRET
+│       ├── routes/
+│       │   ├── auth.js              ← /register · /login · /me · /google
+│       │   ├── hotels.js            ← 호텔 조회/가용성
+│       │   ├── tickets.js           ← 티켓 조회
+│       │   ├── packages.js          ← 패키지 조회
+│       │   ├── bookings.js          ← 예약 생성/조회/취소 (+ 인벤토리 복원 헬퍼)
+│       │   └── admin/
+│       │       ├── bookings.js      ← 관리자 예약 CRUD · 환불 · CSV export
+│       │       ├── dashboard.js     ← /overview · 매출 시계열
+│       │       ├── payments.js      ← 결제 통계 · 필터 · 상태 업데이트
+│       │       ├── products.js      ← hotels/rooms/tickets/packages CRUD + /featured
+│       │       ├── promotions.js    ← 프로모션 CRUD (+ blackout dates)
+│       │       ├── upload.js        ← multer 기반 이미지 업로드
+│       │       └── users.js         ← 사용자 목록/상세/권한 변경
+│       └── seed.js                  ← 데모 데이터 시드
+│
+├── frontend/                 ← Customer SPA (port 3000)
+│   ├── index.html                   ← Google Identity Services 스크립트 로드
+│   ├── vite.config.js               ← /api, /uploads → :4000 프록시
+│   └── src/
+│       ├── main.jsx                 ← BrowserRouter + AuthProvider + i18n
+│       ├── App.jsx                  ← 라우트 + lazy-load + Header/Footer 셸
+│       ├── i18n/
+│       │   ├── index.js             ← i18next 초기화
+│       │   ├── en.json              ← 영어 리소스
+│       │   └── cn.json              ← 중국어(간체) 리소스
+│       ├── context/
+│       │   └── AuthContext.jsx      ← login · register · logout · updateProfile · loginWithGoogle
+│       ├── utils/
+│       │   └── api.js               ← fetch 래퍼 (get/post/put/del)
+│       ├── components/
+│       │   ├── Header.jsx           ← 언어 토글 · 로그인 상태 · 내비
+│       │   ├── Footer.jsx
+│       │   ├── SearchBar.jsx        ← 홈 히어로 검색
+│       │   ├── ProductCard.jsx      ← 호텔/티켓/패키지 리스트 카드
+│       │   ├── DateRangePicker.jsx  ← 호텔 체크인/아웃 선택기
+│       │   ├── SingleDatePicker.jsx ← 티켓/패키지 일자 선택기
+│       │   └── GoogleSignInButton.jsx ← GIS 버튼 래퍼
+│       └── pages/
+│           ├── Home.jsx
+│           ├── HotelList.jsx · HotelDetail.jsx
+│           ├── TicketList.jsx · TicketDetail.jsx
+│           ├── PackageList.jsx · PackageDetail.jsx
+│           ├── BookingPage.jsx         ← 예약 폼 · snake_case 페이로드 · 총액 계산
+│           ├── BookingConfirmation.jsx ← 예약 완료 (guest_email 쿼리 포워딩)
+│           ├── BookingDetail.jsx       ← 내 예약 상세 + 취소
+│           ├── MyBookings.jsx          ← 내 예약 리스트
+│           ├── OrderLookup.jsx         ← 비회원 주문 조회
+│           ├── Login.jsx · Register.jsx · Profile.jsx
+│
+├── admin/                    ← Admin SPA (port 3001)
+│   ├── index.html
+│   ├── vite.config.js               ← 동일한 /api, /uploads 프록시
+│   └── src/
+│       ├── main.jsx · App.jsx       ← ProtectedRoute 로 로그인 게이팅
+│       ├── context/AuthContext.jsx  ← admin_token 으로 분리 저장
+│       ├── utils/api.js             ← 401 시 자동 / 로 리다이렉트
+│       ├── components/
+│       │   ├── Sidebar.jsx · DataTable.jsx · Modal.jsx
+│       │   ├── Pagination.jsx · StatsCard.jsx · StatusBadge.jsx
+│       │   ├── ImageUploader.jsx        ← multipart/form-data 직접 호출
+│       │   ├── RichTextEditor.jsx
+│       │   ├── BulkInventoryManager.jsx ← 날짜 구간 일괄 재고 생성
+│       │   └── PromotionManager.jsx     ← 상품 안 임베드 프로모션 CRUD
+│       └── pages/
+│           ├── Login.jsx
+│           ├── Dashboard.jsx            ← recharts 시계열
+│           ├── BookingManagement.jsx · BookingDetail.jsx
+│           ├── ProductManagement.jsx
+│           ├── HotelManagement.jsx      ← 호텔 + 객실 타입 + 재고
+│           ├── TicketManagement.jsx · PackageManagement.jsx
+│           ├── UserManagement.jsx · UserDetail.jsx
+│           ├── PaymentManagement.jsx    ← 결제 리스트/필터/상세
+│           └── Settings.jsx
+│
+├── backend/data/             ← (gitignore) SQLite 파일 런타임 저장소
+│   └── high1.db
+└── backend/uploads/          ← (gitignore) multer 가 저장한 이미지
+```
+
+### 4.2 모듈화 원칙
+
+| 원칙 | 적용 방식 |
+|---|---|
+| **3-앱 분리** | backend/admin/frontend 는 완전히 독립된 `package.json`. 공유 코드는 현재 없음(필요 시 공용 `packages/` 도입 가능). |
+| **라우트 = 파일 1개** | `backend/src/routes/<resource>.js` 하나가 해당 리소스의 전체 엔드포인트를 담당. `routes/admin/` 은 관리자 전용 네임스페이스. |
+| **인증 일괄 적용** | 관리자 라우터는 각 파일 상단에서 `router.use(authenticate, requireAdmin)` 로 전체 엔드포인트에 인증을 한 번에 건다. |
+| **재사용 헬퍼 export** | `routes/bookings.js` 의 `restoreBookingInventory` 는 `module.exports` 속성으로 노출되어 `admin/bookings.js` 가 동일 로직(날짜 루프 + `MAX(0, booked_* - qty)`) 을 재사용. |
+| **페이지 lazy-load** | 고객 프런트의 모든 페이지 컴포넌트는 `React.lazy` + `Suspense` 로 코드 스플리팅. admin 은 일반 import (관리자 UX 우선). |
+| **스타일 인라인 객체** | CSS-in-JS 라이브러리 미사용. 페이지/컴포넌트 상단의 `const styles = { ... }` 객체로 관리. |
+| **i18n 키 집중** | 모든 고객 노출 문자열은 `frontend/src/i18n/{en,cn}.json` 두 파일에만 존재. 하드코딩 금지. admin 은 영어 전용이라 i18n 미적용. |
+| **snake_case 계약** | backend REST 응답 · 요청은 전부 snake_case (`product_type`, `check_in`, `booking_number` …). 프런트의 camelCase 로컬 state 는 경계에서만 매핑. |
 
 ---
 
