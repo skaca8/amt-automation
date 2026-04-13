@@ -32,6 +32,16 @@ const router = express.Router();
 // 같은 3개 값만 허용한다. 여기 없는 값이 들어오면 어떤 라우트든 400.
 const ALLOWED_PRODUCT_TYPES = ['hotel', 'ticket', 'package'];
 
+// product_type → 실제 테이블 이름 매핑.
+// 상품 존재 여부를 검증할 때 쓴다 (generate-access-code 시 대상 상품이
+// DB 에 진짜 있는지 확인해, "없는 상품에 묶인 고아 코드" 가 발급되는 걸
+// 막는다).
+const PRODUCT_TABLES = {
+  hotel: 'hotels',
+  ticket: 'tickets',
+  package: 'packages',
+};
+
 // 관리자 전체 권한 게이트.
 router.use(authenticate, requireAdmin);
 
@@ -120,6 +130,117 @@ router.get('/', (req, res) => {
     });
   } catch (err) {
     console.error('Admin list access codes error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+/**
+ * POST / — 새 access code 발급.
+ *
+ * 요청 바디:
+ *   {
+ *     user_id:      number,                              // 코드를 받을 유저
+ *     product_type: 'hotel' | 'ticket' | 'package',
+ *     product_id:   number,
+ *     max_uses?:    number,  // 기본 1. 최소 1. N > 1 이면 같은 코드로
+ *                            // N개의 예약을 만들 수 있다.
+ *     valid_until?: string,  // 'YYYY-MM-DD' 또는 ISO 문자열. 없으면 무기한.
+ *     note?:        string,  // 관리자 내부 메모
+ *   }
+ *
+ * 응답:
+ *   201 { message, access_code: { id, code, ... } }
+ *   400 필수 필드 누락 / 잘못된 product_type / max_uses < 1
+ *   404 user_id 가 가리키는 유저가 없음 / product_id 가 가리키는 상품이 없음
+ *   500 내부 에러
+ *
+ * 설계 메모:
+ *   - 코드 문자열은 서버가 generateAccessCode() 로 생성한다. 클라이언트가
+ *     임의 문자열을 주입할 수 없어 "짧고 예측 가능한 코드" 같은 실수를
+ *     원천 차단.
+ *   - user + product 존재성 사전 검증을 수행해, INSERT 는 FK 제약으로
+ *     조용히 실패하는 대신 바로 404 를 돌려준다 (관리자에게 더 명확).
+ *   - product 가 is_restricted=0 이어도 발급은 허용한다. 그래야 "코드 먼저
+ *     만들고 나중에 상품을 restricted 로 전환" 하는 워크플로가 가능하다.
+ *     대신 is_restricted=0 인 상품에 대해 발급되면 아무 효과 없이 의미
+ *     없는 코드가 되므로, 응답에 product_is_restricted 를 포함해 관리자
+ *     UI 가 경고 배너를 띄울 수 있게 한다.
+ *   - issued_by 에는 현재 관리자 id (req.user.id) 를 기록한다. 감사 용.
+ */
+router.post('/', (req, res) => {
+  try {
+    const db = getDb();
+    const { user_id, product_type, product_id, max_uses, valid_until, note } = req.body || {};
+
+    // 1) 필수 필드 검증.
+    if (!user_id || !product_type || !product_id) {
+      return res.status(400).json({
+        error: 'user_id, product_type, and product_id are required.',
+      });
+    }
+    if (!ALLOWED_PRODUCT_TYPES.includes(product_type)) {
+      return res.status(400).json({
+        error: `product_type must be one of: ${ALLOWED_PRODUCT_TYPES.join(', ')}.`,
+      });
+    }
+
+    // 2) max_uses 정규화. 값이 없거나 1 미만이면 1 로 clamp.
+    //    상한은 의도적으로 걸지 않는다 — 관리자가 원하면 큰 값도 허용.
+    const parsedMaxUses = Number.isFinite(Number(max_uses)) && Number(max_uses) >= 1
+      ? Math.floor(Number(max_uses))
+      : 1;
+
+    // 3) 대상 유저 존재 확인. users.id 가 없으면 FK 제약 대신 404 로 회신.
+    const user = db.prepare('SELECT id FROM users WHERE id = ?').get(user_id);
+    if (!user) {
+      return res.status(404).json({ error: 'Target user not found.' });
+    }
+
+    // 4) 대상 상품 존재 확인 + is_restricted 플래그 조회.
+    //    PRODUCT_TABLES 의 값은 서버 내부 상수이므로 동적 table 이름이어도 안전.
+    const productTable = PRODUCT_TABLES[product_type];
+    const product = db
+      .prepare(`SELECT id, is_restricted FROM ${productTable} WHERE id = ?`)
+      .get(product_id);
+    if (!product) {
+      return res.status(404).json({ error: 'Target product not found.' });
+    }
+
+    // 5) 유니크 코드 생성. UNIQUE 제약이 최종 방어선이지만 이 자리에서
+    //    충돌을 기대하진 않는다(12자 hex 확률적으로 거의 0).
+    const code = generateAccessCode();
+
+    // 6) INSERT. issued_by 는 현재 로그인한 관리자 id.
+    const result = db.prepare(`
+      INSERT INTO access_codes
+        (code, user_id, product_type, product_id, max_uses, current_uses,
+         valid_until, note, status, issued_by)
+      VALUES (?, ?, ?, ?, ?, 0, ?, ?, 'active', ?)
+    `).run(
+      code,
+      user_id,
+      product_type,
+      product_id,
+      parsedMaxUses,
+      valid_until || null,
+      note || null,
+      req.user.id,
+    );
+
+    // 7) 생성된 row 를 다시 읽어서 반환 (created_at 등 서버 생성 컬럼 포함).
+    const created = db.prepare('SELECT * FROM access_codes WHERE id = ?')
+      .get(result.lastInsertRowid);
+
+    res.status(201).json({
+      message: 'Access code issued successfully.',
+      access_code: created,
+      // product 가 아직 restricted 로 표시되지 않은 상태라면 UI 가
+      // "이 상품은 현재 공개 상품이어서 코드가 효력이 없다" 배너를 띄울
+      // 수 있도록 힌트를 같이 반환한다.
+      product_is_restricted: product.is_restricted === 1,
+    });
+  } catch (err) {
+    console.error('Admin create access code error:', err);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
