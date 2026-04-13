@@ -344,6 +344,8 @@ amt-automation/
 ```mermaid
 erDiagram
     USERS ||--o{ BOOKINGS : "places"
+    USERS ||--o{ ACCESS_CODES : "owns"
+    USERS ||--o{ ACCESS_CODES : "issued"
     HOTELS ||--o{ ROOM_TYPES : "has"
     ROOM_TYPES ||--o{ ROOM_INVENTORY : "per-date"
     ROOM_TYPES ||--o{ BOOKINGS : "booked as"
@@ -352,6 +354,7 @@ erDiagram
     PACKAGES ||--o{ PACKAGE_INVENTORY : "per-date"
     PACKAGES ||--o{ PACKAGE_ITEMS : "bundles"
     PACKAGES ||--o{ BOOKINGS : "booked as (polymorphic)"
+    ACCESS_CODES ||--o{ BOOKINGS : "redeemed by"
     BOOKINGS ||--|| PAYMENTS : "charged via"
     BOOKINGS ||--|| VOUCHERS : "issues"
 
@@ -383,6 +386,7 @@ erDiagram
         string amenities "JSON array"
         int is_featured
         int sort_order
+        int is_restricted "1 = access-code 구매 게이트 켜짐"
         string status "active | inactive"
         datetime created_at
     }
@@ -427,6 +431,7 @@ erDiagram
         string location
         int is_featured
         int sort_order
+        int is_restricted "1 = access-code 구매 게이트 켜짐"
         string status
         datetime created_at
     }
@@ -453,6 +458,7 @@ erDiagram
         string duration
         int is_featured
         int sort_order
+        int is_restricted "1 = access-code 구매 게이트 켜짐"
         string status
         datetime created_at
     }
@@ -478,6 +484,7 @@ erDiagram
         int id PK
         string booking_number UK "BK-XXXXXXXXXXXX"
         int user_id FK "nullable (게스트 예약)"
+        int access_code_id FK "nullable, 구매 게이트 예약만"
         string guest_name
         string guest_email
         string guest_phone
@@ -498,6 +505,21 @@ erDiagram
         string special_requests
         datetime created_at
         datetime updated_at
+    }
+
+    ACCESS_CODES {
+        int id PK
+        string code UK "ACG-XXXXXXXXXXXX"
+        int user_id FK "코드를 보유할 특정 유저"
+        string product_type "hotel | ticket | package"
+        int product_id "polymorphic — 게이트 대상 상품"
+        int max_uses "1 이상. 관리자가 발급 시 지정"
+        int current_uses "지금까지 소비된 횟수 (취소 시 롤백)"
+        string valid_until "선택. YYYY-MM-DD 만료일"
+        string note "관리자 내부 메모"
+        string status "active | exhausted | revoked"
+        int issued_by FK "발급 관리자 users.id"
+        datetime issued_at
     }
 
     PAYMENTS {
@@ -549,6 +571,9 @@ erDiagram
 | `payments` | 1 예약 당 1 결제 행으로 관리(부분 결제 미지원). 환불은 `status='refunded'` + `refund_amount` 갱신. |
 | `vouchers` | 1 예약 당 1 바우처. `code` 는 UNIQUE. 취소/환불 시 `status='cancelled'` 로 비활성화. |
 | `promotions` | `blackout_dates` 는 JSON 배열 문자열. 실제 할인 적용 로직은 현재 예약 생성 경로에서 참조되지 않음(향후 확장 대상). |
+| `access_codes` | **구매 게이트** 토큰 저장. `code` UNIQUE (`ACG-XXXXXXXXXXXX`). `(user_id, product_type, product_id)` 인덱스. `current_uses` 는 예약 생성 트랜잭션에서 `+1`, 취소/환불 트랜잭션에서 `MAX(0, n-1)` 로 롤백되며, `max_uses` 에 도달하면 `status='exhausted'` 로 자동 전이. 관리자가 `DELETE /admin/access-codes/:id` 하면 `status='revoked'` 로 soft delete (이력은 남는다). `hotels/tickets/packages.is_restricted=1` 과 짝이 되어야 게이트가 실제로 발동. |
+| `hotels/tickets/packages.is_restricted` | 0 기본. 1 이면 해당 상품을 예약할 때 유효한 `access_code` 가 POST body 에 실려 있어야 하고 로그인 필수. 목록/상세 페이지에서는 🔒 "Invite only" 배지로 노출되지만 상품 자체는 숨지 않는다(정책: "배지 달고 노출 + 예약만 차단"). |
+| `bookings.access_code_id` | nullable. 코드로 만들어진 예약 row 에만 채워지며, 취소 시 이 id 로 `access_codes.current_uses` 를 되돌리는 역추적 경로 역할을 한다. 별도 `access_code_redemptions` 감사 테이블이 필요 없는 설계 근거. |
 | JSON-in-TEXT 컬럼 | `amenities`, `images`, `includes`, `blackout_dates` 는 SQLite TEXT 에 JSON 문자열로 저장. 라우트 핸들러가 응답 직전에 `JSON.parse` 로 펼쳐 반환. |
 
 ### 5.3 스키마 진화 규칙
