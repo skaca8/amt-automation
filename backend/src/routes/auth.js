@@ -318,8 +318,8 @@ router.post('/google', async (req, res) => {
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(insert.lastInsertRowid);
     }
 
-    // Issue our own session token. Mirrors the shape used by /login so
-    // the frontend AuthContext does not need to special-case Google.
+    // 우리 자체 세션 토큰 발급. 응답 모양은 /login 과 완전히 동일하게
+    // 맞춰서 프런트엔드 AuthContext 가 구글 경로에 별도 분기 없이 동작하게.
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
 
     res.json({
@@ -333,17 +333,39 @@ router.post('/google', async (req, res) => {
   }
 });
 
-// GET /me
+/**
+ * GET /me — 현재 로그인 사용자 정보 반환.
+ *
+ * authenticate 미들웨어가 이미 req.user 에 password 제외 컬럼을
+ * 꽂아 두었으므로 바로 JSON 으로 돌려주기만 하면 된다.
+ *
+ * 응답: 200 { user } | 401 (인증 실패)
+ */
 router.get('/me', authenticate, (req, res) => {
   res.json({ user: req.user });
 });
 
-// PUT /me
+/**
+ * PUT /me — 내 프로필 부분 수정.
+ *
+ * 요청 바디 (모두 optional): { name, phone, nationality, language }
+ * 응답:
+ *   200 { message, user }
+ *   400 수정 대상 필드가 하나도 없음
+ *   401 인증 실패
+ *   500 내부 에러
+ *
+ * email 과 role 은 의도적으로 수정 대상에서 제외된다 — 이메일 변경은
+ * 별도 검증 플로우가 필요하고, role 은 관리자 엔드포인트에서만 바꿀 수
+ * 있어야 한다.
+ */
 router.put('/me', authenticate, (req, res) => {
   try {
     const { name, phone, nationality, language } = req.body;
     const db = getDb();
 
+    // 동적 UPDATE 빌더 패턴: 요청 바디에 들어온 필드만 SET 절에 추가.
+    // 이렇게 해야 부분 업데이트에서 나머지 컬럼을 null 로 덮어쓰지 않는다.
     const updates = [];
     const values = [];
 
@@ -356,6 +378,7 @@ router.put('/me', authenticate, (req, res) => {
       return res.status(400).json({ error: 'No fields to update.' });
     }
 
+    // 모든 변경 경로에서 updated_at 을 함께 갱신.
     updates.push("updated_at = datetime('now')");
     values.push(req.user.id);
 
