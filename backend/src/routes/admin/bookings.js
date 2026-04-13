@@ -27,7 +27,7 @@ const { authenticate, requireAdmin } = require('../../middleware/auth');
 // 고객 예약 라우트(routes/bookings.js)의 인벤토리 복원 루프를 그대로
 // 재사용한다. 관리자 취소/환불도 원래 예약이 점유했던 같은 날짜별
 // 카운터를 풀어야 하므로 로직을 한 곳에 유지한다.
-const { restoreBookingInventory } = require('../bookings');
+const { restoreBookingInventory, restoreAccessCodeUsage } = require('../bookings');
 
 const router = express.Router();
 
@@ -351,6 +351,11 @@ router.put('/:id/status', (req, res) => {
       const wasReleased = booking.status === 'cancelled' || booking.status === 'refunded';
       if (!wasReleased && (status === 'cancelled' || status === 'refunded')) {
         restoreBookingInventory(db, booking);
+        // 이 예약이 access_code 로 만들어졌다면 해당 코드의 current_uses
+        // 카운터도 1 되돌린다. booking.access_code_id 가 NULL 이면
+        // no-op 이라 일반 예약에는 영향 없음. booking.js 의 고객 취소
+        // 경로와 같은 헬퍼를 재사용해 로직이 두 곳으로 분기하지 않도록.
+        restoreAccessCodeUsage(db, booking);
         db.prepare("UPDATE vouchers SET status = 'cancelled' WHERE booking_id = ?").run(booking.id);
       }
 
@@ -482,6 +487,10 @@ router.post('/:id/refund', (req, res) => {
       const wasReleased = booking.status === 'cancelled' || booking.status === 'refunded';
       if (!wasReleased) {
         restoreBookingInventory(db, booking);
+        // restricted 상품 예약이었다면 access code current_uses 도 1 반환.
+        // 일반(코드 없는) 예약이면 booking.access_code_id == NULL 이어서
+        // no-op. 고객 취소 경로와 같은 헬퍼를 재사용한다.
+        restoreAccessCodeUsage(db, booking);
       }
 
       db.prepare("UPDATE payments SET refund_amount = ?, status = 'refunded' WHERE booking_id = ?")
