@@ -32,6 +32,8 @@ const emptyPackage = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
   price: '', status: 'active', items: [], images: [],
   is_featured: 0, sort_order: 0,
+  // is_restricted: hotel/ticket 과 동일한 access-code 구매 게이트 플래그.
+  is_restricted: 0,
 }
 
 /**
@@ -157,6 +159,8 @@ export default function PackageManagement() {
       images: pkg.images || [],
       is_featured: pkg.is_featured || 0,
       sort_order: pkg.sort_order || 0,
+      // 수정 모달 진입 시 access-code 게이트 플래그 동기화.
+      is_restricted: pkg.is_restricted || 0,
     })
     setShowModal(true)
   }
@@ -437,6 +441,23 @@ export default function PackageManagement() {
               placeholder="0"
             />
           </div>
+        </div>
+        {/* Restricted 토글 — access code 구매 게이트 플래그.
+            hotel/ticket 관리 페이지와 동일 패턴. */}
+        <div className="form-group">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={form.is_restricted === 1}
+              onChange={(e) => setForm({ ...form, is_restricted: e.target.checked ? 1 : 0 })}
+              style={{ width: 18, height: 18, cursor: 'pointer' }}
+            />
+            <span>{'\u{1F512}'} Restricted (access code required to book)</span>
+          </label>
+          <small style={{ color: '#64748b', marginLeft: 26 }}>
+            When enabled, only users with a matching access code can book this package.
+            Issue codes on the "Access Codes" page.
+          </small>
         </div>
         <div className="form-group">
           <label>Images</label>

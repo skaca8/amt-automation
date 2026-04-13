@@ -41,6 +41,9 @@ const emptyHotel = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
   address: '', amenities: '', status: 'active', images: [],
   is_featured: 0, sort_order: 0,
+  // is_restricted: 1 이면 이 호텔은 access code 가 있는 유저만 예약 가능.
+  // 기본값은 0 — 신규 호텔은 공개 예약 가능한 상태.
+  is_restricted: 0,
 }
 
 // 새 객실 타입 생성 시 초기 폼 값. max_guests 는 2명 기본.
@@ -195,6 +198,8 @@ export default function HotelManagement() {
       images: hotel.images || [],
       is_featured: hotel.is_featured || 0,
       sort_order: hotel.sort_order || 0,
+      // 기존 호텔을 수정 모드로 열 때도 access-code 게이트 플래그를 미리 채운다.
+      is_restricted: hotel.is_restricted || 0,
     })
     setShowHotelModal(true)
   }
@@ -598,6 +603,24 @@ export default function HotelManagement() {
               placeholder="0"
             />
           </div>
+        </div>
+        {/* Restricted 토글 — access code 구매 게이트 플래그.
+            체크하면 이 호텔은 목록에서 🔒 배지가 달리고, BookingPage 에서
+            access_code 입력을 강제한다. 발급은 /access-codes 페이지에서. */}
+        <div className="form-group">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={hotelForm.is_restricted === 1}
+              onChange={(e) => setHotelForm({ ...hotelForm, is_restricted: e.target.checked ? 1 : 0 })}
+              style={{ width: 18, height: 18, cursor: 'pointer' }}
+            />
+            <span>{'\u{1F512}'} Restricted (access code required to book)</span>
+          </label>
+          <small style={{ color: '#64748b', marginLeft: 26 }}>
+            When enabled, only users with a matching access code can book this hotel.
+            Issue codes on the "Access Codes" page.
+          </small>
         </div>
         <div className="form-group">
           <label>Images</label>

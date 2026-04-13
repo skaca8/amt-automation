@@ -35,6 +35,8 @@ const emptyTicket = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
   category: '', price: '', status: 'active', images: [],
   is_featured: 0, sort_order: 0,
+  // is_restricted: access-code 구매 게이트 플래그. hotel/ticket/package 동일 정책.
+  is_restricted: 0,
 }
 
 /**
@@ -122,6 +124,8 @@ export default function TicketManagement() {
       images: ticket.images || [],
       is_featured: ticket.is_featured || 0,
       sort_order: ticket.sort_order || 0,
+      // 기존 티켓 수정 모달 진입 시 access-code 게이트 플래그 동기화.
+      is_restricted: ticket.is_restricted || 0,
     })
     setShowModal(true)
   }
@@ -393,6 +397,23 @@ export default function TicketManagement() {
               placeholder="0"
             />
           </div>
+        </div>
+        {/* Restricted 토글 — access code 구매 게이트 플래그.
+            hotel/package 관리 페이지와 동일 패턴. */}
+        <div className="form-group">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={form.is_restricted === 1}
+              onChange={(e) => setForm({ ...form, is_restricted: e.target.checked ? 1 : 0 })}
+              style={{ width: 18, height: 18, cursor: 'pointer' }}
+            />
+            <span>{'\u{1F512}'} Restricted (access code required to book)</span>
+          </label>
+          <small style={{ color: '#64748b', marginLeft: 26 }}>
+            When enabled, only users with a matching access code can book this ticket.
+            Issue codes on the "Access Codes" page.
+          </small>
         </div>
         <div className="form-group">
           <label>Images</label>
