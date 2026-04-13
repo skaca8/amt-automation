@@ -968,10 +968,159 @@ flowchart TB
 
 ## 9. 실행 방법
 
-<!-- TODO:SECTION-9 -->
+### 9.1 전제 조건
+
+- **Node.js ≥ 18** (18 / 20 / 22 모두 동작 확인)
+- **npm** (Node 설치 시 함께 제공)
+- **Unix-like OS 권장** (macOS / Linux). Windows 는 `start-windows.bat` 사용.
+
+### 9.2 최초 실행 — 원클릭
+
+```bash
+git clone <this repo> amt-automation
+cd amt-automation
+
+# 각 앱 의존성 설치 (처음 한 번)
+cd backend  && npm install && cd ..
+cd frontend && npm install && cd ..
+cd admin    && npm install && cd ..
+
+# 3개 앱 동시 기동
+./start.sh
+```
+
+기동 완료 후:
+
+| URL | 설명 |
+|---|---|
+| http://localhost:3000 | 고객 사이트 |
+| http://localhost:3001 | 관리자 패널 |
+| http://localhost:4000/api/health | 백엔드 헬스체크 |
+
+첫 기동 시 `backend/data/high1.db` 가 없으면 `start.sh` 가 자동으로 `node src/seed.js` 를 실행해 데모 데이터를 채웁니다.
+
+### 9.3 기본 계정
+
+| 구분 | 이메일 | 비밀번호 |
+|---|---|---|
+| 관리자 | `admin@high1.com` | `admin123` |
+| 테스트 고객 | `guest@test.com` | `test123` |
+
+### 9.4 종료
+
+```bash
+# start.sh 로 기동한 경우
+Ctrl+C
+
+# 혹은 별도 터미널에서
+./stop.sh
+```
+
+### 9.5 DB 초기화 / 재시드
+
+```bash
+cd backend
+rm -rf data
+npm run seed
+npm start
+```
+
+### 9.6 개별 기동 (디버깅 용)
+
+```bash
+# 터미널 1 — 백엔드
+cd backend
+npm run dev              # node --watch 로 핫 리로드
+
+# 터미널 2 — 고객 프런트
+cd frontend
+npm run dev              # vite @ 3000
+
+# 터미널 3 — 관리자 패널
+cd admin
+npm run dev              # vite @ 3001
+```
+
+### 9.7 Google Sign-In 활성화 (선택)
+
+1. Google Cloud Console → **Credentials** → **Create OAuth client ID → Web application**
+2. **Authorized JavaScript origins**: `http://localhost:3000` (운영 시 실 도메인 추가)
+3. 발급된 Client ID 를 두 곳에 주입:
+
+```bash
+# 백엔드 (서버 측 토큰 검증용)
+cd backend
+GOOGLE_CLIENT_ID="<your-client-id>.apps.googleusercontent.com" npm start
+
+# 프런트엔드 (브라우저 GIS 초기화용)
+cd frontend
+echo 'VITE_GOOGLE_CLIENT_ID=<your-client-id>.apps.googleusercontent.com' > .env.local
+npm run dev
+```
+
+환경변수가 없으면 Google 버튼 자리에 "Google Sign-In is not configured" 안내만 뜨고, 비밀번호 로그인은 정상 동작합니다.
+
+### 9.8 빌드 (운영용 정적 파일)
+
+```bash
+cd frontend && npm run build    # → frontend/dist
+cd admin    && npm run build    # → admin/dist
+```
+
+백엔드는 별도 빌드 단계가 없습니다. `node src/index.js` 를 production 매니저(pm2, systemd 등)로 띄우면 됩니다.
 
 ---
 
 ## 10. 참고 문서
 
-<!-- TODO:SECTION-10 -->
+### 10.1 리포 내부 문서
+
+| 파일 | 내용 | 언어 |
+|---|---|---|
+| [`GUIDE.md`](./GUIDE.md) | 최종 사용자용 실행 안내서. 엔드유저 관점에서 "어떻게 띄우나" | 한국어 |
+| [`CLAUDE.md`](./CLAUDE.md) | AI 코딩 어시스턴트(Claude Code 등)용 리포 가이드. 프로젝트 전반 컨벤션 요약 | 한·영 혼합 |
+| `backend/src/index.js` | 부트스트랩 + 라우트 mount 순서. 전체 구조를 한눈에 확인 | 코드 + 주석 |
+| `backend/src/config/database.js` | 스키마 · ALTER 규칙 · transaction() 시맨틱 | 코드 + 주석 |
+| `backend/src/routes/bookings.js` | 예약 생성 / 취소 / 인벤토리 복원의 정본 구현 | 코드 + 주석 |
+
+### 10.2 소스 코드 핵심 포인트
+
+| 질문 | 파일 · 라인 |
+|---|---|
+| 어떻게 sql.js 가 better-sqlite3 처럼 보이나? | `backend/src/config/database.js` (`DatabaseWrapper`, `PreparedStatement`) |
+| 예약 트랜잭션이 어떻게 롤백되나? | `backend/src/routes/bookings.js` (`router.post('/', ...)` 내 `db.transaction(() => { ... })()`) |
+| 관리자 취소 시 인벤토리 복원 | `backend/src/routes/admin/bookings.js` (`PUT /:id/status`, `POST /:id/refund`) |
+| JWT 발급 / 검증 | `backend/src/routes/auth.js` · `backend/src/middleware/auth.js` |
+| Google ID token 검증 | `backend/src/routes/auth.js` (`POST /google`) |
+| Google 버튼 (프런트 렌더링) | `frontend/src/components/GoogleSignInButton.jsx` |
+| 언어별 상품 이름 선택 헬퍼 | `frontend/src/pages/BookingPage.jsx` (`pickLocalized`) 와 같은 페이지 들 |
+| 고객 i18n 리소스 | `frontend/src/i18n/{en,cn}.json` |
+| 호텔 detail 응답을 frontend 가 어떻게 풀어내나 | `frontend/src/pages/BookingPage.jsx` (`fetchProduct` 의 hotel → `{ ...hotel, room_types }` 병합) |
+
+### 10.3 외부 레퍼런스
+
+- [Express 4.x 공식 가이드](https://expressjs.com/en/4x/api.html)
+- [sql.js GitHub](https://github.com/sql-js/sql.js)
+- [bcryptjs GitHub](https://github.com/dcodeIO/bcrypt.js)
+- [jsonwebtoken GitHub](https://github.com/auth0/node-jsonwebtoken)
+- [google-auth-library-nodejs](https://github.com/googleapis/google-auth-library-nodejs) — `OAuth2Client.verifyIdToken` 참고
+- [Google Identity Services (GIS) — Sign In With Google](https://developers.google.com/identity/gsi/web/guides/overview)
+- [Vite 5 Guide](https://vitejs.dev/guide/)
+- [React Router v6 — lazy loading](https://reactrouter.com/en/main/route/lazy)
+- [i18next — React Integration](https://react.i18next.com/)
+- [Mermaid — diagrams in Markdown](https://mermaid.js.org/)
+
+---
+
+### 변경 이력 (요약)
+
+| 커밋 | 요약 |
+|---|---|
+| `cfa7705` | 초기 MVP (PR #1 머지) |
+| `ad6276b` | `CLAUDE.md` 초안 (AI 어시스턴트용 가이드) |
+| `e504ce7` | 예약 플로우 end-to-end 버그 수정, 인증 게이트 추가, 인벤토리 무결성 복원 |
+| `c06b286` | Google Sign-In (customer) 추가 |
+| `d671965` ~ `a111d5b` | backend · admin · frontend 소스 전체 한글 주석 정교화 (11 커밋) |
+| `4052079` ~ (현재) | 본 README 아키텍처 문서 생성 (섹션별 점진 커밋) |
+
+> 본 README 는 현재 브랜치 `claude/add-claude-documentation-4j8M3` 의 상태를 기준으로 작성됐습니다. 머지 시점에 추가 변경이 생기면 이 문서도 함께 갱신해 주세요.
