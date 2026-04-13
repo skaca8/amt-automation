@@ -947,6 +947,77 @@ flowchart TB
     Client -- "localStorage.token 저장<br/>이후 Authorization: Bearer" --> Next[인증된 API 호출]
 ```
 
+### 7.4b Level 1 — Access-code 구매 게이트 플로우
+
+"특정 유저만 특정 상품을 구매할 수 있도록" 하는 신규 기능의 **발급 →
+전달 → 소비 → 취소 롤백** 전체 수명주기. 관리자 단계(좌상단)와 고객 단계
+(우하단)가 외부 채널(이메일·채팅) 하나로 연결돼 있다.
+
+```mermaid
+flowchart TB
+    subgraph AdminFlow["관리자 단계"]
+        direction TB
+        A1[상품 관리 페이지에서<br/>Restricted 체크박스 ON<br/>PUT /admin/products/:id<br/>is_restricted=1]
+        A2[Access Codes 페이지에서<br/>Issue new code 클릭]
+        A3[POST /admin/access-codes<br/>user_id, product_type, product_id,<br/>max_uses, valid_until?, note?]
+        A4[서버: generateAccessCode<br/>ACG-XXXXXXXXXXXX<br/>INSERT access_codes<br/>status=active, current_uses=0]
+        A5[관리자 UI 에 코드 문자열 표시<br/>Copy 버튼 → 클립보드]
+    end
+
+    OOB((외부 채널<br/>이메일 · 채팅))
+
+    subgraph CustomerFlow["고객 단계"]
+        direction TB
+        C1[로그인 → 상품 페이지 진입]
+        C2{상품.is_restricted?}
+        C3["🔒 Invite only 배지 표시<br/>(목록/상세 공통)"]
+        C4[BookingPage 진입]
+        C5[Access Code 입력 필드 노출]
+        C6[POST /api/bookings<br/>body.access_code 포함]
+    end
+
+    subgraph Gate["백엔드 게이트 (transaction 안)"]
+        direction TB
+        G1[readProductRestriction<br/>is_restricted 조회]
+        G2{restricted?}
+        G3[validateAndConsumeAccessCode<br/>code 매칭 · status · user_id · product · 만료 · 한도]
+        G4{통과?}
+        G5[current_uses += 1<br/>한도 도달 시 status=exhausted<br/>bookings.access_code_id = id]
+        G6[인벤토리 감소 → INSERT bookings/payments/vouchers<br/>COMMIT + saveDb]
+        G7[201 booking + voucher]
+        GX[throw Error.status=401/403<br/>ROLLBACK 전체]
+    end
+
+    subgraph Rollback["취소/환불 롤백"]
+        direction TB
+        R1[PUT /bookings/:id/cancel<br/>또는 admin cancel/refund]
+        R2[restoreBookingInventory<br/>날짜별 booked_* 감소]
+        R3[restoreAccessCodeUsage<br/>booking.access_code_id 있으면<br/>current_uses = MAX 0 n-1<br/>exhausted → active 복원]
+        R4[bookings.status=cancelled<br/>vouchers.status=cancelled]
+    end
+
+    A1 --> A2 --> A3 --> A4 --> A5
+    A5 -. "관리자가 복사해 전달" .-> OOB
+    OOB -. "유저가 붙여넣기" .-> C5
+
+    C1 --> C2
+    C2 -- Yes --> C3 --> C4 --> C5 --> C6
+    C2 -- No --> C4
+    C6 --> G1 --> G2
+    G2 -- Yes --> G3 --> G4
+    G2 -- No --> G6
+    G4 -- Yes --> G5 --> G6 --> G7
+    G4 -- No --> GX
+
+    G7 -. 나중에 .-> R1 --> R2 --> R3 --> R4
+```
+
+> **핵심 불변 조건**:
+> 1. `is_restricted=1` 상품 + `access_code` 누락 → 401/403, 인벤토리 변화 0
+> 2. 게이트 통과 후 **같은 트랜잭션**에서 코드 소비와 예약 생성이 이뤄지므로, 어느 단계든 실패하면 ROLLBACK 으로 `current_uses` 도 함께 되돌려진다
+> 3. 취소 시 `restoreAccessCodeUsage` 가 `MAX(0, n-1)` 을 사용해 double-rollback 에도 음수가 되지 않는다
+> 4. 관리자가 명시적으로 `revoked` 로 전환한 코드는 취소 롤백이 건드리지 않는다 — manual override 우선
+
 ### 7.5 데이터 저장소 (Data Store 목록)
 
 | 스토어 | 물리 형태 | 읽기/쓰기 위치 |
