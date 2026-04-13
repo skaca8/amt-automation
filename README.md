@@ -1037,7 +1037,7 @@ flowchart TB
 | 위협 | 영향 | 대응 | 위치 |
 |---|---|---|---|
 | 비밀번호 평문 노출 | 사용자 자격 유출 | **bcrypt (cost 10)** 해시 저장, `password` 컬럼은 `/auth/me` 응답에서 명시적으로 제외 | `routes/auth.js`, `middleware/auth.js` |
-| JWT 위변조 | 임의 사용자 위장 | **HS256 + `JWT_SECRET`** 환경변수. 개발 fallback 이 있으나 운영 배포 시 반드시 주입 | `middleware/auth.js:34` |
+| JWT 위변조 | 임의 사용자 위장 | **HS256 + `JWT_SECRET`** 환경변수. `NODE_ENV=production` + unset → `process.exit(1)` 로 fail-hard. dev 환경에서는 `crypto.randomBytes(32)` 로 프로세스 수명 내 ephemeral secret 을 생성(재기동 시 기존 토큰 무효화됨). 고정 fallback 문자열은 제거됨. | `middleware/auth.js` |
 | 만료된 토큰 재사용 | 세션 하이재킹 | `jwt.verify` 가 `TokenExpiredError` 던지면 전용 메시지로 401 | `middleware/auth.js:89` |
 | 삭제된 사용자의 유효 토큰 | 고스트 로그인 | 토큰 검증 직후 `SELECT ... WHERE id = ?` 로 실제 사용자 row 재조회, 없으면 401 | `middleware/auth.js:73` |
 | 예약 ID 순차 열거 | 타인 예약 PII 유출 | `GET /bookings/:id` 는 **소유자/어드민/matching guest_email 중 하나** 필수 | `routes/bookings.js` (`isAuthorizedForBooking`) |
@@ -1056,6 +1056,12 @@ flowchart TB
 | GOOGLE_CLIENT_ID 미설정 | 운영상 오류 | `/auth/google` 이 `503 "Google Sign-In is not configured"` 로 명확히 반환. 일반 비밀번호 플로우는 정상 동작 유지 | 같은 파일 |
 | 과도한 페이로드 DoS | 메모리 폭증 | `express.json({ limit: '10mb' })` + multer file size 10MB 제한 | `index.js` + upload 라우트 |
 | CORS 오·설정 | cross-origin 탈취 | 개발 환경은 vite proxy 로 처리, 백엔드는 `app.use(cors())` 기본값. **운영 배포 시 whitelisting 필요** | `index.js` |
+| Access code 탈취 시도 | 타인 발급 코드로 상품 구매 | 코드 검증이 `user_id` 일치를 강제. 로그인 필수(authorization 헤더로 identity 확인). 코드 자체가 새어 나가도 그 유저의 로그인 세션이 없으면 무효. | `routes/bookings.js` `validateAndConsumeAccessCode` |
+| 만료/무효 코드 우회 | 규정 외 구매 | 검증 체인이 status='revoked' → 'exhausted' → user 불일치 → product 불일치 → valid_until 만료 → 한도 초과 순으로 각각 `403` + 원인별 정확한 에러 메시지. WHERE 절에 status 필터를 넣지 않고 "lookup → branch" 구조라 감춰진 상태 전이도 반드시 감지됨. | 같은 파일 |
+| 트랜잭션 중간 실패로 카운터 유령 증가 | `current_uses` 가 실제 예약 없이 증가 | 소비(`+1`) 와 예약/결제/바우처 INSERT 가 **같은 `db.transaction()`** 안에서 실행됨. 어느 단계든 throw 하면 인벤토리·코드 카운터·booking·payment·voucher 가 일괄 ROLLBACK. | 같은 파일 |
+| 이중 취소로 `current_uses` 음수 | 코드 카운터 무결성 훼손 | `restoreAccessCodeUsage` 가 `MAX(0, current_uses - 1)` 로 감소. admin 경로는 `wasReleased` 플래그로 재취소 시 복원 자체를 스킵. | `routes/bookings.js` + `routes/admin/bookings.js` |
+| 관리자가 revoked 코드 복구 시도 | 무효화 우회 | `restoreAccessCodeUsage` 가 `CASE WHEN status='revoked' THEN 'revoked' ELSE ...` 로 revoke 상태는 그대로 유지. manual revoke 는 manual 해제가 필요함(현재는 DB 직접 수정). | 같은 파일 |
+| `/featured` 토글이 임의 테이블 수정 | 스키마 우회 쓰기 | `is_restricted` 필드를 받아 동적 UPDATE 를 만들지만, 테이블 이름은 `PRODUCT_TABLES` allow-list 맵의 값 (`hotels` · `tickets` · `packages`) 에서만 가져온다. 사용자 입력 문자열이 SQL 에 직접 들어가지 않음. | `routes/admin/products.js` |
 
 ### 8.2 전역 예외 처리 전략
 
