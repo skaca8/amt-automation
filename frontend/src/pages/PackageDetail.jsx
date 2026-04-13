@@ -388,7 +388,8 @@ export default function PackageDetail() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem', color: '#475569' }}>
               <span>Unit Price</span>
-              <span>{'\u20A9'}{price.toLocaleString()} / person</span>
+              {/* 통화 기호는 i18n 키로 분리 (common.currencySymbol). */}
+              <span>{t('common.currencySymbol')}{price.toLocaleString()} / person</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem', color: '#475569' }}>
               <span>Quantity</span>
@@ -397,7 +398,7 @@ export default function PackageDetail() {
             <div style={{ borderTop: '2px solid #e2e8f0', paddingTop: 12, marginTop: 8,
               display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem', fontWeight: 700, color: '#1e293b' }}>
               <span>Total</span>
-              <span style={{ color: '#1a73e8' }}>{'\u20A9'}{(price * quantity).toLocaleString()}</span>
+              <span style={{ color: '#1a73e8' }}>{t('common.currencySymbol')}{(price * quantity).toLocaleString()}</span>
             </div>
           </div>
 

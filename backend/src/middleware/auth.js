@@ -27,11 +27,49 @@
 // ============================================================================
 
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { getDb } = require('../config/database');
 
-// JWT 서명/검증에 쓰는 비밀 키. 운영에서는 반드시 환경 변수로 주입.
-// 기본값은 개발 편의용 폴백이며 운영에서 그대로 쓰면 안 된다.
-const JWT_SECRET = process.env.JWT_SECRET || 'high1-resort-secret-key-2026';
+// ---------------------------------------------------------------------------
+// JWT_SECRET 결정 로직
+// ---------------------------------------------------------------------------
+//
+// 이전 구현은 환경변수가 없으면 하드코딩된 문자열
+// ('high1-resort-secret-key-2026') 로 fallback 하고 있었다. 리포지터리가
+// 공개되어 있어 누구나 그 비밀 키로 admin 토큰을 위조할 수 있었다.
+// 이제 다음 규칙으로 바꾼다:
+//
+//   1) process.env.JWT_SECRET 가 설정되어 있으면 그 값을 그대로 사용한다.
+//      (운영/스테이징 환경의 정상 경로.)
+//   2) 설정되지 않은 상태에서 NODE_ENV === 'production' 이면 서버를
+//      부팅하지 않고 즉시 종료한다. 토큰 위조 위험을 운영에 배포할 수
+//      없도록 fail-hard.
+//   3) 개발 환경(default)에서는 프로세스 시작 시점마다 crypto.randomBytes
+//      (32) 로 무작위 64-hex 문자열을 한 번 생성해 in-memory 로만 쓴다.
+//      디스크/리포지터리 어디에도 이 값이 노출되지 않는다. 서버를
+//      재기동하면 기존 토큰은 자연스럽게 무효화되는데, 이는 zero-config
+//      로컬 개발의 합리적 기대와 일치한다.
+//
+// 이 로직은 모듈 로드 시점(= backend/src/index.js 가 require 하는 즉시)
+// 에 실행되므로, 잘못된 환경에서는 app.listen() 이 호출되기 전에 서버가
+// 멈춘다.
+let JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    // 운영 환경: 절대로 기본값을 쓰지 않는다.
+    console.error('\n[FATAL] JWT_SECRET environment variable must be set when NODE_ENV=production.');
+    console.error('        Refusing to boot with an unset secret — tokens could be forged.\n');
+    process.exit(1);
+  }
+  // 개발/테스트 환경: 프로세스 수명 동안만 유효한 무작위 secret 을 생성한다.
+  // 64자 hex 는 jsonwebtoken HS256 의 엔트로피 요구를 충분히 만족한다.
+  JWT_SECRET = crypto.randomBytes(32).toString('hex');
+  // 콘솔에 명확히 경고를 찍어 주어야, 사용자가 "왜 재기동 후 로그인이
+  // 풀리지?" 로 당황하지 않는다.
+  console.warn('[warn] JWT_SECRET is not set — generated an ephemeral secret for this process only.');
+  console.warn('[warn] All existing tokens will be invalidated when the server restarts.');
+  console.warn('[warn] Set the JWT_SECRET environment variable to persist sessions across restarts.');
+}
 
 /**
  * Express 미들웨어 — Authorization 헤더의 JWT 를 검증한다.

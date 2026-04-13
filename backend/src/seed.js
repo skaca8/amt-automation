@@ -88,15 +88,48 @@ function seed() {
   // ============================================================
   // USERS
   // ============================================================
-  // 데모용 고정 계정:
-  //   admin@high1.com  / admin123  (role=admin, 관리자 콘솔 접속)
-  //   guest@test.com   / test123   (role=customer, 고객 앱 접속)
-  // 운영 환경에서는 절대 이 자격증명을 남기지 말 것.
+  //
+  // 데모 계정 2개 생성:
+  //   admin@high1.com  (role=admin, 관리자 콘솔 접속)
+  //   guest@test.com   (role=customer, 고객 앱 접속)
+  //
+  // 비밀번호 결정 규칙:
+  //   1) 환경변수 SEED_ADMIN_PASSWORD / SEED_GUEST_PASSWORD 가 설정돼
+  //      있으면 그 값으로 계정을 만든다. (CI/운영용)
+  //   2) 환경변수가 없으면 기존 GUIDE.md / 온보딩 문서에 명시돼 있는
+  //      관습 값('admin123', 'test123') 을 그대로 사용한다. 이 경로는
+  //      어디까지나 "첫 실행 친화 UX" 를 위한 것이며, 아래에서 명시적
+  //      경고 배너를 출력해 그 사실을 사용자에게 알린다.
+  //
+  // ☢ 운영 환경에서 이 seed 스크립트를 그대로 돌리지 말 것. 운영에서는
+  //   반드시 env 로 강력한 임의 비밀번호를 넣거나, 이 스크립트를
+  //   실행하지 말고 정상 회원가입 플로우로 운영 계정을 만들 것.
   console.log('Creating users...');
 
+  const envAdminPw = process.env.SEED_ADMIN_PASSWORD;
+  const envGuestPw = process.env.SEED_GUEST_PASSWORD;
+  const adminPwPlain = envAdminPw || 'admin123';
+  const guestPwPlain = envGuestPw || 'test123';
+
+  if (!envAdminPw || !envGuestPw) {
+    // 하나라도 기본값이 쓰였으면 눈에 띄는 경고 배너를 출력한다.
+    console.warn('');
+    console.warn('  ╔══════════════════════════════════════════════════════════════╗');
+    console.warn('  ║  ⚠  SEED IS USING WEAK DEMO PASSWORDS                        ║');
+    console.warn('  ║                                                              ║');
+    console.warn('  ║  admin@high1.com  →  ' + adminPwPlain.padEnd(40) + '║');
+    console.warn('  ║  guest@test.com   →  ' + guestPwPlain.padEnd(40) + '║');
+    console.warn('  ║                                                              ║');
+    console.warn('  ║  These are the out-of-the-box onboarding credentials.        ║');
+    console.warn('  ║  Override them before any non-local deploy:                  ║');
+    console.warn('  ║    SEED_ADMIN_PASSWORD=... SEED_GUEST_PASSWORD=... npm seed  ║');
+    console.warn('  ╚══════════════════════════════════════════════════════════════╝');
+    console.warn('');
+  }
+
   // bcrypt 해시. 라운드 10 — routes/auth.js 의 register/login 과 일치.
-  const adminPassword = bcrypt.hashSync('admin123', 10);
-  const guestPassword = bcrypt.hashSync('test123', 10);
+  const adminPassword = bcrypt.hashSync(adminPwPlain, 10);
+  const guestPassword = bcrypt.hashSync(guestPwPlain, 10);
 
   db.prepare(`
     INSERT INTO users (email, password, name, phone, nationality, role, language)

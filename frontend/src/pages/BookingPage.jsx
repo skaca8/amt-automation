@@ -807,8 +807,10 @@ export default function BookingPage() {
                   <span style={styles.summaryLabel}>{t('booking.unitPrice')}</span>
                   <span style={styles.summaryValue}>
                     {/* 가능한 경우 /availability 에서 받은 per-date 단가(quote.perUnit)를
-                        사용하고, 없으면 상품의 base_price 로 fallback. */}
-                    {'\u20A9'}{getPerUnitPrice().toLocaleString()} / {t('common.person')}
+                        사용하고, 없으면 상품의 base_price 로 fallback.
+                        통화 기호는 i18n 키(common.currencySymbol)에서 읽어
+                        언어별 표기(₩/¥/$)를 바꿀 수 있게 한다. */}
+                    {t('common.currencySymbol')}{getPerUnitPrice().toLocaleString()} / {t('common.person')}
                   </span>
                 </div>
                 {quantity > 1 && (
@@ -816,7 +818,7 @@ export default function BookingPage() {
                     <span style={styles.summaryLabel}>
                       {'\u00D7'} {quantity} {t('common.persons')}
                     </span>
-                    <span style={styles.summaryValue}>{'\u20A9'}{total.toLocaleString()}</span>
+                    <span style={styles.summaryValue}>{t('common.currencySymbol')}{total.toLocaleString()}</span>
                   </div>
                 )}
               </div>
@@ -828,8 +830,9 @@ export default function BookingPage() {
                   <span style={styles.summaryLabel}>{t('booking.roomRate')}</span>
                   <span style={styles.summaryValue}>
                     {/* 1박당 객실 단가는 가능한 경우 quote.perNight (per-date 평균)
-                        를 쓰고, 없을 때만 정적 base_price 로 fallback. */}
-                    {'\u20A9'}{Math.round(getPerNightRate()).toLocaleString()}{' '}
+                        를 쓰고, 없을 때만 정적 base_price 로 fallback.
+                        통화 기호는 i18n 로 분리해 locale 별 커스터마이즈를 허용. */}
+                    {t('common.currencySymbol')}{Math.round(getPerNightRate()).toLocaleString()}{' '}
                     / {t('hotel.perNight')}
                   </span>
                 </div>
@@ -841,14 +844,14 @@ export default function BookingPage() {
                     {' \u00D7 '}
                     {hotelRooms} {hotelRooms === 1 ? t('common.room') : t('common.rooms')}
                   </span>
-                  <span style={styles.summaryValue}>{'\u20A9'}{total.toLocaleString()}</span>
+                  <span style={styles.summaryValue}>{t('common.currencySymbol')}{total.toLocaleString()}</span>
                 </div>
               </div>
             )}
 
             <div style={styles.totalRow}>
               <span style={styles.totalLabel}>{t('booking.grandTotal')}</span>
-              <span style={styles.totalAmount}>{'\u20A9'}{total.toLocaleString()}</span>
+              <span style={styles.totalAmount}>{t('common.currencySymbol')}{total.toLocaleString()}</span>
             </div>
 
             <div style={styles.paymentNote}>{t('booking.paymentNote')}</div>

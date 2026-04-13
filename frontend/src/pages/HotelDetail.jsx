@@ -19,7 +19,7 @@
 //   - description 이 HTML 이면 dangerouslySetInnerHTML 로 렌더한다(관리자가
 //     rich text 로 입력 가능). XSS 위험은 어드민 신뢰 가정 하에 수용.
 //   - 가격은 'room.price || basePrice || base_price' 순으로 읽고 원화 기호
-//     ₩(\u20A9) 로 고정 표기. 국제화는 별도 이슈.
+//     통화 기호는 i18n 키(common.currencySymbol)로 분리되어 있다.
 // ============================================================================
 
 import React, { useState, useEffect } from 'react'
@@ -545,7 +545,8 @@ export default function HotelDetail() {
                       </div>
                       <div style={styles.roomPriceCol}>
                         <div style={styles.roomPrice}>
-                          {'\u20A9'}{(room.price || room.basePrice || room.base_price || 0).toLocaleString()}
+                          {/* 통화 기호는 i18n 키로 분리 — locale 에 따라 ₩/¥/$ 등으로 교체 가능. */}
+                          {t('common.currencySymbol')}{(room.price || room.basePrice || room.base_price || 0).toLocaleString()}
                         </div>
                         <div style={styles.roomPriceUnit}>/ room / night</div>
                         {checkIn && checkOut && (() => {
@@ -558,10 +559,10 @@ export default function HotelDetail() {
                               border: '1px solid #e2e8f0', marginBottom: 10, textAlign: 'left'
                             }}>
                               <div style={{ fontSize: '0.8rem', color: '#475569', marginBottom: 4 }}>
-                                {nights} night{nights > 1 ? 's' : ''} {'\u00D7'} {'\u20A9'}{roomPrice.toLocaleString()}
+                                {nights} night{nights > 1 ? 's' : ''} {'\u00D7'} {t('common.currencySymbol')}{roomPrice.toLocaleString()}
                               </div>
                               <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1a73e8' }}>
-                                Total: {'\u20A9'}{roomTotal.toLocaleString()}
+                                Total: {t('common.currencySymbol')}{roomTotal.toLocaleString()}
                               </div>
                             </div>
                           )
