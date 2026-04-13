@@ -337,7 +337,227 @@ amt-automation/
 
 ## 5. ERD — 데이터 모델
 
-<!-- TODO:SECTION-5 -->
+모든 테이블은 `backend/src/config/database.js` 의 `initTables()` 함수 안 한 블록의 `CREATE TABLE IF NOT EXISTS` 로 선언되고, 이후 컬럼 추가는 같은 함수 아래의 idempotent `ALTER TABLE ... ADD COLUMN` 배열에서 일괄 처리됩니다.
+
+### 5.1 엔티티 관계도 (Mermaid)
+
+```mermaid
+erDiagram
+    USERS ||--o{ BOOKINGS : "places"
+    HOTELS ||--o{ ROOM_TYPES : "has"
+    ROOM_TYPES ||--o{ ROOM_INVENTORY : "per-date"
+    ROOM_TYPES ||--o{ BOOKINGS : "booked as"
+    TICKETS ||--o{ TICKET_INVENTORY : "per-date"
+    TICKETS ||--o{ BOOKINGS : "booked as (polymorphic)"
+    PACKAGES ||--o{ PACKAGE_INVENTORY : "per-date"
+    PACKAGES ||--o{ PACKAGE_ITEMS : "bundles"
+    PACKAGES ||--o{ BOOKINGS : "booked as (polymorphic)"
+    BOOKINGS ||--|| PAYMENTS : "charged via"
+    BOOKINGS ||--|| VOUCHERS : "issues"
+
+    USERS {
+        int id PK
+        string email UK
+        string password "bcrypt hash"
+        string name
+        string phone
+        string nationality
+        string role "customer | admin"
+        string language "en | cn"
+        string google_id "nullable — GSI 'sub'"
+        string avatar_url "nullable — 구글 프로필 사진"
+        datetime created_at
+        datetime updated_at
+    }
+
+    HOTELS {
+        int id PK
+        string name_en
+        string name_cn
+        string description_en
+        string description_cn
+        string address
+        string image_url
+        string images "JSON array"
+        real rating
+        string amenities "JSON array"
+        int is_featured
+        int sort_order
+        string status "active | inactive"
+        datetime created_at
+    }
+
+    ROOM_TYPES {
+        int id PK
+        int hotel_id FK
+        string name_en
+        string name_cn
+        string description_en
+        string description_cn
+        int max_guests
+        string bed_type
+        string amenities "JSON array"
+        string image_url
+        string images "JSON array"
+        real base_price
+        int sort_order
+        string status
+    }
+
+    ROOM_INVENTORY {
+        int id PK
+        int room_type_id FK
+        string date "YYYY-MM-DD"
+        int total_rooms
+        int booked_rooms
+        real price "날짜별 특별가 nullable"
+    }
+
+    TICKETS {
+        int id PK
+        string name_en
+        string name_cn
+        string description_en
+        string description_cn
+        string category "ski | activity | entertainment | wellness"
+        string image_url
+        string images "JSON array"
+        real base_price
+        string duration
+        string location
+        int is_featured
+        int sort_order
+        string status
+        datetime created_at
+    }
+
+    TICKET_INVENTORY {
+        int id PK
+        int ticket_id FK
+        string date
+        int total_quantity
+        int booked_quantity
+        real price
+    }
+
+    PACKAGES {
+        int id PK
+        string name_en
+        string name_cn
+        string description_en
+        string description_cn
+        string image_url
+        string images "JSON array"
+        real base_price
+        string includes "JSON array"
+        string duration
+        int is_featured
+        int sort_order
+        string status
+        datetime created_at
+    }
+
+    PACKAGE_ITEMS {
+        int id PK
+        int package_id FK
+        string item_type "hotel | ticket"
+        int item_id "polymorphic"
+        int quantity
+    }
+
+    PACKAGE_INVENTORY {
+        int id PK
+        int package_id FK
+        string date
+        int total_quantity
+        int booked_quantity
+        real price
+    }
+
+    BOOKINGS {
+        int id PK
+        string booking_number UK "BK-XXXXXXXXXXXX"
+        int user_id FK "nullable (게스트 예약)"
+        string guest_name
+        string guest_email
+        string guest_phone
+        string product_type "hotel | ticket | package"
+        int product_id "polymorphic FK"
+        int room_type_id FK "hotel 전용"
+        string check_in "YYYY-MM-DD, 호텔"
+        string check_out "YYYY-MM-DD, 호텔"
+        string visit_date "YYYY-MM-DD, 티켓/패키지"
+        int guests
+        int quantity
+        int nights
+        real total_price
+        string currency "KRW 기본"
+        string status "pending | confirmed | cancelled | refunded | completed"
+        string payment_status "unpaid | paid | refunded"
+        string payment_id "결제 게이트웨이 참조"
+        string special_requests
+        datetime created_at
+        datetime updated_at
+    }
+
+    PAYMENTS {
+        int id PK
+        int booking_id FK
+        real amount
+        string currency
+        string method "stripe | alipay | wechat | bank | paypal"
+        string stripe_payment_id
+        string status "pending | paid | failed | refunded"
+        real refund_amount
+        datetime created_at
+    }
+
+    VOUCHERS {
+        int id PK
+        int booking_id FK
+        string code UK "VCR-XXXXXXXXXX"
+        string qr_data "JSON 문자열 — 바우처 스캔 정보"
+        string status "active | used | cancelled"
+        datetime created_at
+    }
+
+    PROMOTIONS {
+        int id PK
+        string name
+        string discount_type "percentage | fixed"
+        real discount_value
+        string product_type "hotel | ticket | package (nullable = 전체)"
+        int product_id "nullable"
+        string start_date
+        string end_date
+        int min_quantity
+        int max_uses
+        int current_uses
+        string blackout_dates "JSON array"
+        string status
+        datetime created_at
+    }
+```
+
+### 5.2 주요 제약 / 특수 설계
+
+| 테이블 | 설계 메모 |
+|---|---|
+| `users` | 이메일 UNIQUE. 소셜 로그인 사용자도 `password` NOT NULL 제약을 만족시키기 위해 **예측 불가능한 랜덤 bcrypt 해시** 를 저장합니다(아무 비밀번호로도 로그인 불가). `google_id` 의 존재가 "소셜 계정" 플래그 역할. |
+| `bookings` | `user_id` 는 nullable — **게스트 예약** 지원. `product_type` + `product_id` 는 hotels/tickets/packages 세 테이블을 가리키는 폴리모픽 FK (SQLite 수준의 실제 FK 는 걸려 있지 않음). 호텔 예약은 `check_in`/`check_out`, 티켓/패키지는 `visit_date` 만 채웁니다. |
+| `*_inventory` | `(상품_id, date)` UNIQUE. **매 날짜마다 1행**. `booked_*` 카운터는 예약 생성 시 증가, 취소/환불 시 `MAX(0, booked_* - qty)` 로 감소(double-decrement 방지). |
+| `payments` | 1 예약 당 1 결제 행으로 관리(부분 결제 미지원). 환불은 `status='refunded'` + `refund_amount` 갱신. |
+| `vouchers` | 1 예약 당 1 바우처. `code` 는 UNIQUE. 취소/환불 시 `status='cancelled'` 로 비활성화. |
+| `promotions` | `blackout_dates` 는 JSON 배열 문자열. 실제 할인 적용 로직은 현재 예약 생성 경로에서 참조되지 않음(향후 확장 대상). |
+| JSON-in-TEXT 컬럼 | `amenities`, `images`, `includes`, `blackout_dates` 는 SQLite TEXT 에 JSON 문자열로 저장. 라우트 핸들러가 응답 직전에 `JSON.parse` 로 펼쳐 반환. |
+
+### 5.3 스키마 진화 규칙
+
+- **신규 컬럼 추가**는 반드시 두 곳에 동시 적용:
+  1. `initTables()` 의 `CREATE TABLE` 본문 (신규 설치 시)
+  2. 같은 함수 아래 `alterStatements` 배열 (기존 DB 업그레이드 시)
+- 각 `ALTER` 는 `try { db.exec(sql); } catch (e) { /* 이미 존재 */ }` 로 감싸져 **idempotent** 합니다. 서버를 여러 번 재기동해도 에러 없이 통과합니다.
+- 컬럼 **삭제 / 이름 변경 / NOT NULL 제약 완화**는 SQLite 한계로 테이블 재작성 (`CREATE TABLE new → INSERT SELECT → DROP → RENAME`) 이 필요하며, 마이그레이션 시스템이 없으므로 현재는 수동으로 처리해야 합니다.
 
 ---
 
