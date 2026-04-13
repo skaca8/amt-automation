@@ -115,7 +115,107 @@ High1 Resort 외국인 전용 예약 플랫폼은 **한국 강원도 정선의 H
 
 ## 3. 시스템 아키텍처
 
-<!-- TODO:SECTION-3 -->
+### 3.1 레이어 구성 (Layered View)
+
+```mermaid
+flowchart TB
+    subgraph Client["클라이언트 (브라우저)"]
+        direction LR
+        CustBrowser["🌐 고객 브라우저<br/>localhost:3000"]
+        AdmBrowser["🛠 운영자 브라우저<br/>localhost:3001"]
+    end
+
+    subgraph Frontends["Vite Dev Server (SPA Hosting + Proxy)"]
+        direction LR
+        Cust["Customer SPA<br/>React + i18next<br/>(frontend/)"]
+        Adm["Admin SPA<br/>React + recharts<br/>(admin/)"]
+    end
+
+    subgraph Backend["Backend (Express · localhost:4000)"]
+        direction TB
+        MW["공통 미들웨어<br/>cors · express.json · express.urlencoded"]
+        Auth["인증 미들웨어<br/>authenticate · requireAdmin"]
+        PublicR["Public Routes<br/>/api/auth · /api/hotels<br/>/api/tickets · /api/packages<br/>/api/bookings"]
+        AdminR["Admin Routes<br/>/api/admin/**"]
+        StaticR["/uploads 정적 서빙"]
+        Err["404 + 전역 에러 핸들러"]
+    end
+
+    subgraph DataLayer["Data Layer"]
+        direction TB
+        Wrapper["DatabaseWrapper<br/>(sql.js ↔ better-sqlite3 호환 래퍼)"]
+        DB[("SQLite 파일<br/>backend/data/high1.db")]
+        Uploads[("이미지 파일<br/>backend/uploads/")]
+    end
+
+    subgraph External["외부 서비스"]
+        GSI["Google Identity Services<br/>accounts.google.com"]
+    end
+
+    CustBrowser --> Cust
+    AdmBrowser --> Adm
+    CustBrowser -. "GSI JS bundle" .-> GSI
+    GSI -. "ID Token (JWT)" .-> CustBrowser
+
+    Cust -- "HTTP /api, /uploads" --> MW
+    Adm -- "HTTP /api, /uploads" --> MW
+
+    MW --> Auth
+    Auth --> PublicR
+    Auth --> AdminR
+    MW --> StaticR
+    PublicR & AdminR --> Err
+
+    PublicR --> Wrapper
+    AdminR --> Wrapper
+    Wrapper --> DB
+    StaticR --> Uploads
+    AdminR -- "multer 저장" --> Uploads
+    PublicR -- "POST /auth/google<br/>verifyIdToken" --> GSI
+```
+
+### 3.2 요청 수명주기 (Request Lifecycle)
+
+브라우저 요청이 서버에 도달해 응답이 돌아가는 과정:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant V as Vite Dev Server
+    participant E as Express App (index.js)
+    participant M as Middleware Chain
+    participant R as Route Handler
+    participant W as DatabaseWrapper
+    participant D as sql.js (in-memory)
+    participant F as Disk (high1.db)
+
+    B->>V: GET /api/bookings/my
+    V->>E: proxy → localhost:4000
+    E->>M: cors · json parser
+    M->>M: authenticate(req)
+    Note over M: Authorization 헤더의<br/>JWT 검증 → req.user 주입
+    M->>R: next() → /bookings/my handler
+    R->>W: db.prepare(SELECT ...).all(userId)
+    W->>D: sql.js execute
+    D-->>W: rows
+    W-->>R: rows
+    R-->>B: 200 { bookings: [...] }
+
+    rect rgb(240,248,255)
+    Note over R,F: 쓰기 경로일 경우:<br/>db.transaction(() => { ... })()<br/>→ 커밋 시점에 saveDb()<br/>→ sql.js export() → fs.writeFileSync(high1.db)
+    end
+```
+
+### 3.3 런타임 프로세스 토폴로지
+
+| 프로세스 | 포트 | 기동 명령 | 실행 주기 |
+|---|---|---|---|
+| `node src/index.js` (Express) | 4000 | `cd backend && npm start` | 단일 프로세스, 기동 시 `initDb()` 가 `high1.db` 를 메모리 로드 |
+| `vite` (customer) | 3000 | `cd frontend && npm run dev` | 단일 프로세스, `/api` `/uploads` 를 backend 로 프록시 |
+| `vite` (admin) | 3001 | `cd admin && npm run dev` | 단일 프로세스, 동일한 프록시 설정 |
+
+> **한 가지 특수성**: sql.js 는 **메모리 내 DB** 이며 매 쓰기 후 `saveDb()` 가 전체 DB 를 `high1.db` 파일로 재직렬화합니다. 따라서 "하나의 Node 프로세스 = 한 번에 한 write-owner" 가 강제되고, 같은 DB 파일을 다른 프로세스가 동시 오픈하면 마지막 writer 가 이전 writer 의 변경을 덮어쓸 수 있습니다. 개발/단일 인스턴스 배포에 적합한 설계입니다.
 
 ---
 
