@@ -40,6 +40,10 @@ const adminDashboardRoutes = require('./routes/admin/dashboard');
 const adminPaymentRoutes = require('./routes/admin/payments');
 const uploadRoutes = require('./routes/admin/upload');
 const promotionRoutes = require('./routes/admin/promotions');
+// 구매 게이트용 access code 발급 CRUD. 관리자가 "특정 유저 × 특정 상품"
+// 조합의 1회성(또는 N회성) 구매 권한 코드를 발급한다. 자세한 설계는
+// routes/admin/access-codes.js 파일 헤더 참고.
+const accessCodeRoutes = require('./routes/admin/access-codes');
 
 const app = express();
 // PORT 환경변수가 지정되지 않으면 4000 을 사용한다.
@@ -129,6 +133,9 @@ async function start() {
   app.use('/api/admin/payments', adminPaymentRoutes);
   app.use('/api/admin/upload', uploadRoutes);
   app.use('/api/admin/promotions', promotionRoutes);
+  // Access-code 구매 게이트 관리. 각 엔드포인트는 파일 내부에서
+  // authenticate + requireAdmin 미들웨어로 게이팅됨.
+  app.use('/api/admin/access-codes', accessCodeRoutes);
 
   // 5) 존재하지 않는 경로에 대한 404 핸들러.
   //    반드시 모든 라우트 뒤에 와야 "매칭되지 않은" 요청이 여기로 흘러온다.
