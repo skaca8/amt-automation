@@ -245,6 +245,67 @@ router.post('/', (req, res) => {
   }
 });
 
+/**
+ * GET /:id — 단일 access code 상세 + 소비 내역.
+ *
+ * URL params: :id — access_codes.id (integer)
+ *
+ * 응답:
+ *   200 {
+ *     access_code: { ...row, user_email, user_name, issued_by_email },
+ *     redemptions: [{ booking_id, booking_number, status, created_at,
+ *                     check_in, check_out, visit_date, total_price }]
+ *   }
+ *   404 해당 id 없음
+ *   500 내부 에러
+ *
+ * redemptions 배열은 이 코드가 실제로 사용된 예약 목록이다. bookings
+ * 테이블의 access_code_id 컬럼으로 역조회한다. 별도 감사 테이블 없이
+ * bookings row 자체가 "소비 기록" 역할을 한다.
+ *
+ * cancelled 상태의 예약도 이 목록에 포함시킨다 — 관리자가 "이 유저가
+ * 코드를 썼다가 취소했다" 를 한눈에 볼 수 있도록. 다만 current_uses 에는
+ * 반영되지 않는다(cancel 경로에서 롤백됨).
+ */
+router.get('/:id', (req, res) => {
+  try {
+    const db = getDb();
+
+    // 코드 본문 + 대상/발급자 email 을 JOIN.
+    // issued_by 가 NULL 인 경우(관리자 계정 삭제 등)도 안전하게 처리되도록
+    // LEFT JOIN 두 번.
+    const row = db.prepare(`
+      SELECT ac.*,
+             u.email  AS user_email,
+             u.name   AS user_name,
+             ib.email AS issued_by_email
+      FROM access_codes ac
+      LEFT JOIN users u  ON u.id  = ac.user_id
+      LEFT JOIN users ib ON ib.id = ac.issued_by
+      WHERE ac.id = ?
+    `).get(req.params.id);
+
+    if (!row) {
+      return res.status(404).json({ error: 'Access code not found.' });
+    }
+
+    // 이 코드로 만들어진 예약 목록. created_at 최신 순.
+    // NOTE: cancelled 예약도 역사 추적을 위해 함께 보여 준다.
+    const redemptions = db.prepare(`
+      SELECT id AS booking_id, booking_number, status, created_at,
+             check_in, check_out, visit_date, total_price, quantity
+      FROM bookings
+      WHERE access_code_id = ?
+      ORDER BY created_at DESC
+    `).all(row.id);
+
+    res.json({ access_code: row, redemptions });
+  } catch (err) {
+    console.error('Admin get access code error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 module.exports = router;
 // generateAccessCode 를 바깥으로도 노출해 후속 커밋에서 재사용할 여지를
 // 둔다(예: 대량 생성 스크립트). 현재 정상 경로는 POST / 안에서만 호출.
