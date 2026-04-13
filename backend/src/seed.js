@@ -1,27 +1,75 @@
+// ============================================================================
+// 개발용 데이터 시드 스크립트
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) initDb() 로 DB 를 준비한다(없으면 새로 만든다).
+//   2) 기존 테이블 데이터를 FK 역순으로 전부 삭제한다.
+//   3) 관리자 / 게스트 계정, 호텔 3개 + 방 타입 8개, 티켓 5개, 패키지 3개
+//      를 새로 INSERT 한다.
+//   4) 오늘부터 30일 동안의 room/ticket/package 인벤토리를 한 트랜잭션으로
+//      일괄 생성한다(주말 가격 +30%, 주말 예약률 가중치 반영).
+//   5) 샘플 예약 3건(확정/대기/취소)과 대응 결제/바우처 row 를 만든다.
+//
+// 실행 방법: `node backend/src/seed.js` (또는 `npm run seed`).
+// 절대 운영 DB 에 돌리지 말 것 — DELETE 로 시작하므로 모든 데이터가 날아간다.
+//
+// 주의:
+//   - DELETE 순서는 FK 체인을 따른다. vouchers → payments → bookings →
+//     package_inventory → package_items → packages → ticket_inventory →
+//     tickets → room_inventory → room_types → hotels → users.
+//     거꾸로 돌리면 FK 제약에 걸려 실패한다.
+//   - 비밀번호는 bcrypt 라운드 10 으로 해시해 저장한다. (admin123, test123)
+//   - 인벤토리 생성은 db.transaction() 안에 넣어 한 번의 saveDb 로 끝낸다.
+//     바깥에서 호출하면 매 INSERT 마다 전체 DB 직렬화가 일어나 수십 배
+//     느려진다.
+// ============================================================================
+
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const { getDb, initDb } = require('./config/database');
 
+/** routes/bookings.js 와 동일한 12자리 예약 번호 생성기. */
 function generateBookingNumber() {
   return 'BK-' + uuidv4().replace(/-/g, '').substring(0, 12).toUpperCase();
 }
 
+/** routes/bookings.js 와 동일한 10자리 바우처 코드 생성기. */
 function generateVoucherCode() {
   return 'VCR-' + uuidv4().replace(/-/g, '').substring(0, 10).toUpperCase();
 }
 
+/**
+ * 오늘에서 `daysFromNow` 일 뒤의 날짜를 YYYY-MM-DD 포맷으로 반환.
+ * 음수도 허용되므로 과거 날짜 시뮬레이션에도 쓸 수 있다(현재는 0~29 만 사용).
+ */
 function getDateString(daysFromNow) {
   const d = new Date();
   d.setDate(d.getDate() + daysFromNow);
   return d.toISOString().split('T')[0];
 }
 
+/**
+ * 실제 시드 작업 본체. initDb() 가 끝난 뒤 호출한다.
+ *
+ * 단계:
+ *   1) 테이블 전체 DELETE (FK 역순)
+ *   2) 사용자 2명 INSERT (admin / guest)
+ *   3) 호텔 3 + 방 타입 8 INSERT
+ *   4) 티켓 5 + 패키지 3 (+ package_items) INSERT
+ *   5) 30일치 room/ticket/package inventory 를 한 트랜잭션으로 INSERT
+ *   6) 샘플 예약 3건 + payments + vouchers INSERT
+ *
+ * 부작용: DB 에 대규모 INSERT 가 일어나고 high1.db 가 여러 번 저장된다.
+ */
 function seed() {
   const db = getDb();
 
   console.log('Seeding High1 Resort database...');
 
-  // Clear existing data (order matters due to foreign keys)
+  // 기존 데이터 삭제. 외래 키 때문에 **자식 테이블부터** 지워야 한다.
+  // vouchers / payments → bookings → (package_inventory, package_items) →
+  // packages → ticket_inventory → tickets → room_inventory → room_types →
+  // hotels → users 순.
   db.exec(`
     DELETE FROM vouchers;
     DELETE FROM payments;
@@ -40,8 +88,13 @@ function seed() {
   // ============================================================
   // USERS
   // ============================================================
+  // 데모용 고정 계정:
+  //   admin@high1.com  / admin123  (role=admin, 관리자 콘솔 접속)
+  //   guest@test.com   / test123   (role=customer, 고객 앱 접속)
+  // 운영 환경에서는 절대 이 자격증명을 남기지 말 것.
   console.log('Creating users...');
 
+  // bcrypt 해시. 라운드 10 — routes/auth.js 의 register/login 과 일치.
   const adminPassword = bcrypt.hashSync('admin123', 10);
   const guestPassword = bcrypt.hashSync('test123', 10);
 
@@ -349,6 +402,10 @@ function seed() {
   // ============================================================
   // INVENTORY (next 30 days)
   // ============================================================
+  // 오늘(포함)부터 30일치 room/ticket/package 재고를 만든다.
+  // 가격은 주말(토/일)에 1.3배, 평일은 1.0배.
+  // 예약률(= preBooked)도 주말이 더 높게 시뮬레이션한다.
+  // 전체 루프를 하나의 트랜잭션으로 묶어서 saveDb 호출을 한 번으로 줄인다.
   console.log('Creating inventory for next 30 days...');
 
   const roomTypeIds = [
@@ -374,10 +431,15 @@ function seed() {
   const insertTicketInv = db.prepare('INSERT INTO ticket_inventory (ticket_id, date, total_quantity, booked_quantity, price) VALUES (?, ?, ?, ?, ?)');
   const insertPackageInv = db.prepare('INSERT INTO package_inventory (package_id, date, total_quantity, booked_quantity, price) VALUES (?, ?, ?, ?, ?)');
 
+  // db.transaction() 래퍼는 콜백을 BEGIN..COMMIT 안에서 실행한다.
+  // 내부 모든 INSERT 가 끝나야 단 한 번의 파일 직렬화가 일어난다.
   const insertAllInventory = db.transaction(() => {
     for (let day = 0; day < 30; day++) {
       const dateStr = getDateString(day);
+      // Date#getDay(): 0 = Sunday, 6 = Saturday.
       const isWeekend = [0, 6].includes(new Date(dateStr).getDay());
+      // 주말 가격 +30%. 운영에서는 관리자 콘솔의 bulk inventory 업데이트로
+      // 세밀하게 조정할 수 있다.
       const multiplier = isWeekend ? 1.3 : 1.0;
 
       // Room inventory
@@ -408,9 +470,12 @@ function seed() {
   // ============================================================
   // SAMPLE BOOKINGS
   // ============================================================
+  // 프런트엔드 UI 상태(확정/대기/취소 각각)를 바로 확인할 수 있도록
+  // 세 건의 샘플 예약을 만든다. 각 예약은 결제 row 와 바우처 row 를
+  // 함께 갖는다(실제 예약 API 와 동일한 구조).
   console.log('Creating sample bookings...');
 
-  // Booking 1: Confirmed hotel booking
+  // 예약 1: 확정된 호텔 예약 (Zhang Wei, Deluxe Mountain View, 2박)
   const bn1 = generateBookingNumber();
   const checkIn1 = getDateString(5);
   const checkIn1End = getDateString(7);
@@ -435,7 +500,8 @@ function seed() {
     JSON.stringify({ booking_number: bn1, voucher_code: vc1, product_type: 'hotel', guest_name: 'Zhang Wei', total_price: 560000 })
   );
 
-  // Booking 2: Pending ticket booking
+  // 예약 2: 미결제(pending) 상태의 티켓 예약 — 비로그인 게스트 예약
+  // (user_id NULL). guest_email 은 Tanaka Yuki 의 것.
   const bn2 = generateBookingNumber();
   const visitDate2 = getDateString(10);
   const booking2 = db.prepare(`
@@ -459,7 +525,8 @@ function seed() {
     JSON.stringify({ booking_number: bn2, voucher_code: vc2, product_type: 'ticket', guest_name: 'Tanaka Yuki', total_price: 158000 })
   );
 
-  // Booking 3: Cancelled package booking
+  // 예약 3: 취소·환불 완료된 패키지 예약. 결제는 refunded, 바우처는
+  // cancelled 상태. 관리자 콘솔의 환불 UI 테스트에 쓰인다.
   const bn3 = generateBookingNumber();
   const visitDate3 = getDateString(3);
   const booking3 = db.prepare(`
@@ -495,6 +562,11 @@ function seed() {
   console.log('  - 3 sample bookings (confirmed, pending, cancelled)');
 }
 
+/**
+ * 엔트리 포인트. DB 초기화가 비동기라서 seed() 를 await 된 initDb() 뒤로
+ * 감싼다. 실패 시 종료 코드 1 로 프로세스를 죽여 CI/스크립트 러너가
+ * 에러를 감지할 수 있게 한다.
+ */
 async function main() {
   await initDb();
   seed();

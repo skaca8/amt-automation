@@ -1,23 +1,66 @@
+// ============================================================================
+// /api/admin/products — 관리자 상품 CRUD (+ 인벤토리 관리)
+// ----------------------------------------------------------------------------
+// 이 파일이 제공하는 엔드포인트는 4개 리소스를 다룬다:
+//
+//   HOTELS:
+//     GET /                POST /               PUT /:id              DELETE /:id
+//
+//   ROOM TYPES:
+//     GET /room-types      POST /room-types     PUT /room-types/:id   DELETE /room-types/:id
+//
+//   TICKETS:
+//     GET /tickets         POST /tickets        PUT /tickets/:id      DELETE /tickets/:id
+//
+//   PACKAGES:
+//     GET /packages        POST /packages       PUT /packages/:id     DELETE /packages/:id
+//
+//   INVENTORY:
+//     GET/PUT /room-inventory, /ticket-inventory, /package-inventory
+//     POST /*-inventory/bulk   — 날짜 범위 + 요일 필터 기반 일괄 설정
+//
+//   공통:
+//     PUT /featured        — 상품의 is_featured / sort_order 빠른 토글
+//
+// 공통 규약:
+//   - DELETE 는 soft delete. row 를 지우지 않고 status='inactive' 로 표기한다.
+//     공개 목록 라우트가 WHERE status='active' 로 필터링하므로 자동으로 숨는다.
+//   - amenities / images / includes 컬럼은 JSON 문자열 저장. 응답 전에
+//     JSON.parse, INSERT/UPDATE 시 JSON.stringify.
+//   - 인벤토리 UPSERT 는 `ON CONFLICT(...) DO UPDATE` 로 날짜별 중복을 덮어쓴다.
+//     bulk 버전은 `CASE WHEN ? IS NOT NULL THEN ? ELSE existing END` 패턴으로
+//     "null 로 넘기면 기존 값 유지" 의미론을 구현한다.
+// ============================================================================
+
 const express = require('express');
 const { getDb } = require('../../config/database');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
 
 const router = express.Router();
 
-// All routes require admin authentication
+// 전체 라우터에 관리자 인증 적용.
 router.use(authenticate, requireAdmin);
 
-// Map of accepted product_type values → the actual table name the admin
-// endpoints act on. Using an explicit allow-list prevents the previous bug
-// where an unrecognized product_type silently defaulted to `packages` and
-// wrote to the wrong table.
+// 허용된 product_type 값 → 실제 테이블 이름 매핑. 명시적인 allow-list 를
+// 두는 이유: 과거 구현에서는 알 수 없는 product_type 이 조용히 'packages'
+// 로 폴백돼 엉뚱한 테이블에 쓰는 버그가 있었다. 이 map 에 없는 값은
+// 400 으로 거부된다.
 const PRODUCT_TABLES = {
   hotel: 'hotels',
   ticket: 'tickets',
   package: 'packages',
 };
 
-// PUT /featured - quick toggle featured / sort_order on a product.
+/**
+ * PUT /featured — 상품의 featured 플래그 / sort_order 를 빠르게 토글.
+ *
+ * Body: { product_type, product_id, is_featured?, sort_order? }
+ *
+ * product_type 이 PRODUCT_TABLES 에 없으면 400. 이 allow-list 덕분에
+ * 동적 table 문자열 삽입도 안전하다(사용자 입력이 직접 SQL 에 가지 않음).
+ *
+ * 응답: 200 { message } | 400 유효성 | 500 내부 에러
+ */
 router.put('/featured', (req, res) => {
   try {
     const db = getDb();
@@ -45,8 +88,8 @@ router.put('/featured', (req, res) => {
     }
 
     values.push(product_id);
-    // `table` comes from the whitelisted PRODUCT_TABLES map, so interpolating
-    // it into the SQL string is safe — no user string reaches the query.
+    // `table` 은 PRODUCT_TABLES allow-list 에서 온 값이라 SQL 삽입이
+    // 안전하다 — 사용자 입력 문자열이 직접 쿼리에 들어가지 않는다.
     db.prepare(`UPDATE ${table} SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
     res.json({ message: 'Featured status updated.' });
@@ -59,8 +102,14 @@ router.put('/featured', (req, res) => {
 // ============================================================
 // HOTELS CRUD
 // ============================================================
+// 관리자용이므로 status='inactive' 도 모두 반환한다 (공개 라우트
+// routes/hotels.js 와는 달리). soft delete 된 호텔을 복구하거나 수정하기
+// 위함.
 
-// GET / - list all hotels
+/**
+ * GET / — 모든 호텔 목록 (inactive 포함).
+ * amenities / images 는 JSON.parse 된 배열로 반환.
+ */
 router.get('/', (req, res) => {
   try {
     const db = getDb();
@@ -77,7 +126,12 @@ router.get('/', (req, res) => {
   }
 });
 
-// POST / - create hotel
+/**
+ * POST / — 호텔 생성.
+ * 필수: name_en. 나머지는 null 허용 / 기본값 사용.
+ * amenities, images 는 배열로 받아 JSON.stringify 후 저장.
+ * is_featured 는 0/1 정수 컬럼이므로 boolean 을 캐스팅.
+ */
 router.post('/', (req, res) => {
   try {
     const db = getDb();
@@ -108,7 +162,10 @@ router.post('/', (req, res) => {
   }
 });
 
-// PUT /:id - update hotel
+/**
+ * PUT /:id — 호텔 부분 수정. 동적 UPDATE 빌더 패턴 (req.body 에 들어온
+ * 필드만 SET). amenities/images 는 배열 → JSON.stringify.
+ */
 router.put('/:id', (req, res) => {
   try {
     const db = getDb();
@@ -153,7 +210,11 @@ router.put('/:id', (req, res) => {
   }
 });
 
-// DELETE /:id - delete hotel (soft delete by setting status to inactive)
+/**
+ * DELETE /:id — 호텔 soft delete (status='inactive').
+ * 실제 레코드 삭제가 아니므로 FK 참조(room_types, bookings)는 그대로 남는다.
+ * 공개 라우트는 status='active' 만 반환하므로 자동으로 숨겨진다.
+ */
 router.delete('/:id', (req, res) => {
   try {
     const db = getDb();
@@ -174,7 +235,12 @@ router.delete('/:id', (req, res) => {
 // ROOM TYPES CRUD
 // ============================================================
 
-// GET /room-types - list all room types
+/**
+ * GET /room-types — 방 타입 목록.
+ * Query: { hotel_id? }  — 호텔별 필터.
+ * 응답: room_types 에 LEFT JOIN 으로 hotel_name 을 붙여서 반환.
+ * amenities / images 는 JSON 파싱된 배열.
+ */
 router.get('/room-types', (req, res) => {
   try {
     const db = getDb();
@@ -204,7 +270,10 @@ router.get('/room-types', (req, res) => {
   }
 });
 
-// POST /room-types - create room type
+/**
+ * POST /room-types — 방 타입 생성.
+ * 필수: hotel_id, name_en, base_price. hotel_id 존재 여부 확인 후 INSERT.
+ */
 router.post('/room-types', (req, res) => {
   try {
     const db = getDb();
@@ -239,7 +308,10 @@ router.post('/room-types', (req, res) => {
   }
 });
 
-// PUT /room-types/:id - update room type
+/**
+ * PUT /room-types/:id — 방 타입 부분 수정.
+ * hotel_id 까지 변경 가능하다 (한 호텔의 방을 다른 호텔로 이관 등).
+ */
 router.put('/room-types/:id', (req, res) => {
   try {
     const db = getDb();
@@ -284,7 +356,9 @@ router.put('/room-types/:id', (req, res) => {
   }
 });
 
-// DELETE /room-types/:id - delete room type
+/**
+ * DELETE /room-types/:id — 방 타입 soft delete.
+ */
 router.delete('/room-types/:id', (req, res) => {
   try {
     const db = getDb();
@@ -304,8 +378,10 @@ router.delete('/room-types/:id', (req, res) => {
 // ============================================================
 // TICKETS CRUD
 // ============================================================
+// 기본 구조는 HOTELS 와 동일. 주요 차이점은 category/duration/location
+// 같은 티켓 전용 필드가 있다는 것뿐.
 
-// GET /tickets - list all tickets
+/** GET /tickets — 모든 티켓 목록. */
 router.get('/tickets', (req, res) => {
   try {
     const db = getDb();
@@ -317,7 +393,7 @@ router.get('/tickets', (req, res) => {
   }
 });
 
-// POST /tickets - create ticket
+/** POST /tickets — 티켓 생성. 필수: name_en, base_price. */
 router.post('/tickets', (req, res) => {
   try {
     const db = getDb();
@@ -346,7 +422,7 @@ router.post('/tickets', (req, res) => {
   }
 });
 
-// PUT /tickets/:id - update ticket
+/** PUT /tickets/:id — 티켓 부분 수정. */
 router.put('/tickets/:id', (req, res) => {
   try {
     const db = getDb();
@@ -390,7 +466,7 @@ router.put('/tickets/:id', (req, res) => {
   }
 });
 
-// DELETE /tickets/:id - delete ticket
+/** DELETE /tickets/:id — 티켓 soft delete. */
 router.delete('/tickets/:id', (req, res) => {
   try {
     const db = getDb();
@@ -410,8 +486,12 @@ router.delete('/tickets/:id', (req, res) => {
 // ============================================================
 // PACKAGES CRUD
 // ============================================================
+// 패키지는 package_items 라는 자식 테이블을 가진다. POST/PUT 에서
+// items 배열을 받으면 package_items 를 DELETE-and-INSERT 방식으로
+// 전부 새로 쓴다 (diff 계산보다 단순/안전하고, 아이템 수가 적어 부담
+// 없음).
 
-// GET /packages - list all packages
+/** GET /packages — 모든 패키지 목록 (includes/images JSON 파싱). */
 router.get('/packages', (req, res) => {
   try {
     const db = getDb();
@@ -428,7 +508,15 @@ router.get('/packages', (req, res) => {
   }
 });
 
-// POST /packages - create package
+/**
+ * POST /packages — 패키지 생성 + 선택적으로 package_items 일괄 INSERT.
+ *
+ * Body: { ...package fields, items?: [{ item_type, item_id, quantity? }] }
+ *
+ * items 배열이 있으면 패키지 INSERT 후 각 item 을 package_items 에
+ * INSERT 한다. item_type 은 seed 와 동일하게 'hotel' | 'room_type' |
+ * 'ticket' 중 하나를 사용하는 것이 관례.
+ */
 router.post('/packages', (req, res) => {
   try {
     const db = getDb();
@@ -450,7 +538,8 @@ router.post('/packages', (req, res) => {
 
     const packageId = result.lastInsertRowid;
 
-    // Insert package items if provided
+    // items 배열이 넘어왔으면 package_items 도 같이 INSERT. 같은 prepared
+    // statement 를 재사용해 반복 SQL 파싱 비용을 피한다.
     if (items && Array.isArray(items)) {
       const insertItem = db.prepare('INSERT INTO package_items (package_id, item_type, item_id, quantity) VALUES (?, ?, ?, ?)');
       for (const item of items) {
@@ -470,7 +559,12 @@ router.post('/packages', (req, res) => {
   }
 });
 
-// PUT /packages/:id - update package
+/**
+ * PUT /packages/:id — 패키지 부분 수정 + 옵션으로 items 전체 교체.
+ *
+ * items 배열이 넘어오면 package_items 를 DELETE 한 뒤 다시 INSERT 한다
+ * (전체 교체 의미론). items 를 생략하면 기존 아이템 구성은 그대로 유지.
+ */
 router.put('/packages/:id', (req, res) => {
   try {
     const db = getDb();
@@ -502,7 +596,8 @@ router.put('/packages/:id', (req, res) => {
       db.prepare(`UPDATE packages SET ${updates.join(', ')} WHERE id = ?`).run(...values);
     }
 
-    // Update package items if provided
+    // items 가 있으면 DELETE-and-INSERT 로 아이템 구성을 전체 교체.
+    // diff 계산 없이 단순히 다 지우고 다시 넣는 편이 버그가 적다.
     if (items && Array.isArray(items)) {
       db.prepare('DELETE FROM package_items WHERE package_id = ?').run(req.params.id);
       const insertItem = db.prepare('INSERT INTO package_items (package_id, item_type, item_id, quantity) VALUES (?, ?, ?, ?)');
@@ -523,7 +618,7 @@ router.put('/packages/:id', (req, res) => {
   }
 });
 
-// DELETE /packages/:id - delete package
+/** DELETE /packages/:id — 패키지 soft delete. package_items 는 그대로 둔다. */
 router.delete('/packages/:id', (req, res) => {
   try {
     const db = getDb();
@@ -543,8 +638,22 @@ router.delete('/packages/:id', (req, res) => {
 // ============================================================
 // INVENTORY MANAGEMENT
 // ============================================================
+// 각 상품 타입마다 날짜별 인벤토리(남은 수량 + 가격) 를 CRUD 하는
+// 엔드포인트가 있다. 세 가지 테이블(room_inventory / ticket_inventory /
+// package_inventory)은 컬럼 구조가 거의 같아서 코드 모양도 평행하다.
+//
+// 세 가지 패턴:
+//   1) GET /{type}-inventory/:id?from_date=&to_date=
+//        단순 기간 조회.
+//   2) PUT /{type}-inventory
+//        { id, items: [{ date, total, price }] } 를 받아 UPSERT 일괄.
+//   3) POST /{type}-inventory/bulk
+//        { id, start_date, end_date, total_quantity?, price?, days_of_week? }
+//        로 날짜 범위에 걸쳐 UPSERT. days_of_week 가 없으면 모든 요일,
+//        있으면 지정 요일(0=일요일~6=토요일)에만 적용한다.
+//        total_quantity / price 를 null 로 넘기면 기존 값을 그대로 유지.
 
-// GET /room-inventory/:room_type_id - get room inventory
+/** GET /room-inventory/:room_type_id — 특정 방 타입의 재고 기간 조회. */
 router.get('/room-inventory/:room_type_id', (req, res) => {
   try {
     const db = getDb();
@@ -561,7 +670,7 @@ router.get('/room-inventory/:room_type_id', (req, res) => {
   }
 });
 
-// GET /ticket-inventory/:ticket_id - get ticket inventory
+/** GET /ticket-inventory/:ticket_id — 티켓 재고 기간 조회. */
 router.get('/ticket-inventory/:ticket_id', (req, res) => {
   try {
     const db = getDb();
@@ -578,7 +687,7 @@ router.get('/ticket-inventory/:ticket_id', (req, res) => {
   }
 });
 
-// GET /package-inventory/:package_id - get package inventory
+/** GET /package-inventory/:package_id — 패키지 재고 기간 조회. */
 router.get('/package-inventory/:package_id', (req, res) => {
   try {
     const db = getDb();
@@ -595,7 +704,14 @@ router.get('/package-inventory/:package_id', (req, res) => {
   }
 });
 
-// PUT /room-inventory - bulk update room inventory
+/**
+ * PUT /room-inventory — 명시적 날짜 배열 UPSERT.
+ *
+ * Body: { room_type_id, items: [{ date, total, price }] }
+ *
+ * `ON CONFLICT(room_type_id, date) DO UPDATE` 로 기존 row 를 덮어쓴다.
+ * 전체 items 를 단일 트랜잭션으로 실행해 saveDb 호출을 한 번으로 줄인다.
+ */
 router.put('/room-inventory', (req, res) => {
   try {
     const db = getDb();

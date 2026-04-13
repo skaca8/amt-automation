@@ -1,3 +1,21 @@
+// ============================================================================
+// /api/admin/promotions — 프로모션(할인) 관리 라우트
+// ----------------------------------------------------------------------------
+// 이 파일이 제공하는 엔드포인트:
+//   GET    /active  — 현재 활성 중인 프로모션 (start/end 날짜 범위 충족)
+//   GET    /        — 전체 프로모션 목록 (status, product_type 필터)
+//   POST   /        — 프로모션 생성
+//   PUT    /:id     — 프로모션 수정 (부분 업데이트)
+//   DELETE /:id     — soft delete (status = 'inactive')
+//
+// 특이 컬럼 blackout_dates:
+//   - DB 에 JSON 문자열(TEXT)로 저장. 응답 직전에 JSON.parse 해서 배열로
+//     내보낸다. INSERT/UPDATE 시 배열이면 stringify, 이미 문자열이면 그대로
+//     사용해 이중 인코딩을 피한다.
+//   - 프런트엔드가 배열로 다루기 쉽게 parseBlackoutDates 헬퍼를 통해
+//     일관되게 변환한다.
+// ============================================================================
+
 const express = require('express');
 const { getDb } = require('../../config/database');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
@@ -5,6 +23,11 @@ const { authenticate, requireAdmin } = require('../../middleware/auth');
 const router = express.Router();
 router.use(authenticate, requireAdmin);
 
+/**
+ * blackout_dates 컬럼(TEXT JSON)을 배열로 파싱해 promo row 에 다시 붙인다.
+ * JSON.parse 실패나 null 컬럼에 대해서도 안전하게 [] 를 반환한다.
+ * 같은 객체를 수정해서 반환(in-place mutation).
+ */
 function parseBlackoutDates(promo) {
   if (promo && promo.blackout_dates) {
     try {
@@ -18,7 +41,10 @@ function parseBlackoutDates(promo) {
   return promo;
 }
 
-// GET /active - get currently active promotions
+/**
+ * GET /active — 오늘 날짜가 start_date ~ end_date 범위에 들어가고 status=active
+ * 인 프로모션을 반환한다. start/end 가 NULL 인 프로모션(무기한)도 포함.
+ */
 router.get('/active', (req, res) => {
   try {
     const db = getDb();
@@ -37,7 +63,10 @@ router.get('/active', (req, res) => {
   }
 });
 
-// GET / - list all promotions
+/**
+ * GET / — 프로모션 목록.
+ * Query: { status?, product_type? }  — 단순 일치 필터.
+ */
 router.get('/', (req, res) => {
   try {
     const db = getDb();
@@ -65,7 +94,18 @@ router.get('/', (req, res) => {
   }
 });
 
-// POST / - create promotion
+/**
+ * POST / — 프로모션 생성.
+ *
+ * Body:
+ *   { name, discount_type?, discount_value, product_type?, product_id?,
+ *     start_date?, end_date?, min_quantity?, max_uses?, status?,
+ *     blackout_dates? }
+ *
+ * - discount_type 기본값은 'percentage'. 'fixed' 도 허용.
+ * - blackout_dates 가 배열이면 stringify, 문자열이면 그대로 저장해
+ *   이중 인코딩을 막는다.
+ */
 router.post('/', (req, res) => {
   try {
     const db = getDb();
@@ -83,6 +123,8 @@ router.post('/', (req, res) => {
       return res.status(400).json({ error: 'discount_type must be "fixed" or "percentage".' });
     }
 
+    // 배열이면 직렬화, 이미 문자열이면 그대로. 이중 인코딩(예: "\"[...]\"")
+    // 을 만들지 않도록 타입을 확인한다. undefined 이면 빈 배열.
     const blackoutStr = blackout_dates
       ? (typeof blackout_dates === 'string' ? blackout_dates : JSON.stringify(blackout_dates))
       : '[]';
@@ -112,7 +154,12 @@ router.post('/', (req, res) => {
   }
 });
 
-// PUT /:id - update promotion
+/**
+ * PUT /:id — 프로모션 부분 수정.
+ *
+ * 같은 동적 UPDATE 빌더 패턴을 사용해 바디에 들어온 필드만 SET.
+ * discount_type 이 들어오면 'fixed'/'percentage' 유효성 검증을 추가로 한다.
+ */
 router.put('/:id', (req, res) => {
   try {
     const db = getDb();
@@ -166,7 +213,10 @@ router.put('/:id', (req, res) => {
   }
 });
 
-// DELETE /:id - soft delete promotion
+/**
+ * DELETE /:id — soft delete. 레코드를 실제로 지우지 않고
+ * status = 'inactive' 로 표기한다 (과거 사용 내역 추적을 위해).
+ */
 router.delete('/:id', (req, res) => {
   try {
     const db = getDb();

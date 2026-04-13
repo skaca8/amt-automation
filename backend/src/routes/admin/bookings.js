@@ -1,21 +1,56 @@
+// ============================================================================
+// /api/admin/bookings — 관리자 예약 관리 라우트
+// ----------------------------------------------------------------------------
+// 이 파일이 제공하는 엔드포인트:
+//   GET  /stats         — 대시보드용 예약 통계
+//   GET  /export        — 필터 조건에 맞는 예약을 CSV 로 다운로드
+//   GET  /              — 페이지네이션/필터가 붙은 예약 목록
+//   GET  /:id           — 예약 상세 (+ voucher/payment/product/user)
+//   PUT  /:id/status    — 상태 변경 (cancelled/refunded 시 인벤토리 복원)
+//   PUT  /:id/payment   — 결제 상태 동기화 (bookings + payments 양쪽)
+//   POST /:id/refund    — 환불 처리 (+ 인벤토리 복원 + 바우처 취소)
+//
+// 공통 동작:
+//   - 전체 라우터에 authenticate + requireAdmin 을 일괄 적용.
+//   - cancelled/refunded 로 전이할 때는 반드시 routes/bookings.js 의
+//     restoreBookingInventory 로 인벤토리를 되돌린다.
+//     (이전 버전에서는 이 복원이 빠져 있어 관리자가 취소할 때마다 방/
+//      티켓이 영구적으로 "팔린 상태" 로 남는 버그가 있었다.)
+//   - 상태 값은 반드시 ALLOWED_BOOKING_STATUSES 안에서만 허용된다.
+//     알 수 없는 문자열이 bookings.status 에 들어가면 대시보드/필터가
+//     조용히 깨진다.
+// ============================================================================
+
 const express = require('express');
 const { getDb } = require('../../config/database');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
-// Reuse the inventory-restore loop from the customer booking route so admin
-// cancellations / refunds release the same per-date counters that the
-// original reservation consumed.
+// 고객 예약 라우트(routes/bookings.js)의 인벤토리 복원 루프를 그대로
+// 재사용한다. 관리자 취소/환불도 원래 예약이 점유했던 같은 날짜별
+// 카운터를 풀어야 하므로 로직을 한 곳에 유지한다.
 const { restoreBookingInventory } = require('../bookings');
 
 const router = express.Router();
 
-// Allow-list of booking status values admins can set. Anything outside this
-// set would corrupt downstream queries (dashboards, filters, etc.).
+// 관리자가 설정 가능한 booking status 허용 목록. 이 allow-list 는 필수
+// — 임의 문자열이 status 컬럼에 들어가면 통계/필터 쿼리가 조용히 어긋난다.
 const ALLOWED_BOOKING_STATUSES = ['pending', 'confirmed', 'cancelled', 'refunded', 'completed'];
 
-// All routes require admin authentication
+// 이 라우터의 모든 엔드포인트는 관리자 인증이 필요하다.
 router.use(authenticate, requireAdmin);
 
-// GET /stats - dashboard statistics
+/**
+ * GET /stats — 관리자 대시보드용 예약 통계.
+ *
+ * 응답 JSON:
+ *   {
+ *     total_bookings,           // 전체 예약 수
+ *     total_revenue,            // 취소 제외 합계
+ *     today_bookings,           // 오늘 생성된 예약 수
+ *     status_breakdown: [{ status, count }],
+ *     payment_breakdown: [{ payment_status, count }],
+ *     product_breakdown: [{ product_type, count }]
+ *   }
+ */
 router.get('/stats', (req, res) => {
   try {
     const db = getDb();
@@ -52,7 +87,21 @@ router.get('/stats', (req, res) => {
   }
 });
 
-// GET /export - export bookings as CSV
+/**
+ * GET /export — 필터된 예약 집합을 CSV 로 다운로드.
+ *
+ * Query (모두 optional): status, payment_status, product_type,
+ *                       from_date, to_date (YYYY-MM-DD).
+ *
+ * 응답:
+ *   Content-Type: text/csv
+ *   Content-Disposition: attachment; filename=bookings_export.csv
+ *
+ * CSV 구축은 간단한 string concat 방식이지만, guest_name 은
+ * 큰따옴표로 감싸고 내부의 " 를 "" 로 이스케이프해 RFC 4180 을 최소한
+ * 준수한다. 다른 필드에 쉼표/따옴표가 포함될 가능성이 있다면 동일한
+ * quote 로직을 적용해야 한다.
+ */
 router.get('/export', (req, res) => {
   try {
     const db = getDb();
@@ -86,7 +135,7 @@ router.get('/export', (req, res) => {
 
     const bookings = db.prepare(query).all(...params);
 
-    // Build CSV
+    // CSV 헤더 — 프런트 다운로드 UI 의 컬럼 라벨과 순서 맞춰 둔다.
     const headers = [
       'Booking Number', 'Guest Name', 'Guest Email', 'Guest Phone',
       'Product Type', 'Product ID', 'Check In', 'Check Out', 'Visit Date',
@@ -99,6 +148,8 @@ router.get('/export', (req, res) => {
     for (const b of bookings) {
       const row = [
         b.booking_number,
+        // guest_name 은 쉼표/따옴표/한글 공백이 있을 수 있어 따옴표로 감싼다.
+        // 내부 " 는 "" 로 이스케이프 — RFC 4180 CSV 규격.
         `"${(b.guest_name || '').replace(/"/g, '""')}"`,
         b.guest_email,
         b.guest_phone || '',
@@ -128,7 +179,23 @@ router.get('/export', (req, res) => {
   }
 });
 
-// GET / - list all bookings with filters and pagination
+/**
+ * GET / — 예약 목록 (필터 + 페이지네이션).
+ *
+ * Query:
+ *   status, payment_status, product_type,
+ *   from_date, to_date,
+ *   search,                  // guest_name / email / booking_number 부분 일치
+ *   page = 1, limit = 20
+ *
+ * 응답:
+ *   200 {
+ *     bookings: [...],
+ *     pagination: { page, limit, total, total_pages }
+ *   }
+ *
+ * 카운트 쿼리와 데이터 쿼리를 분리해 실행 — 같은 WHERE 절을 공유한다.
+ */
 router.get('/', (req, res) => {
   try {
     const db = getDb();
@@ -188,7 +255,13 @@ router.get('/', (req, res) => {
   }
 });
 
-// GET /:id - booking detail
+/**
+ * GET /:id — 예약 상세. (고객용 GET /:id 와 비슷하지만 관리자용은
+ * 소유자 검증 없이 언제나 열람 가능하고, 사용자 row 까지 함께 반환한다.)
+ *
+ * 응답: 200 { booking, voucher, payment, product, room_type, user }
+ *       404 없음 | 500 내부 에러
+ */
 router.get('/:id', (req, res) => {
   try {
     const db = getDb();
@@ -230,10 +303,26 @@ router.get('/:id', (req, res) => {
   }
 });
 
-// PUT /:id/status - update booking status.
-// When an admin transitions a booking to `cancelled`, we must also release
-// the inventory the booking was holding and deactivate its voucher — the
-// previous implementation silently leaked inventory forever.
+/**
+ * PUT /:id/status — 예약 상태 변경.
+ *
+ * Body: { status }  // ALLOWED_BOOKING_STATUSES 중 하나
+ *
+ * 핵심 동작:
+ *   - 상태가 `cancelled` 또는 `refunded` 로 전이할 때만 인벤토리를
+ *     복원하고 바우처를 비활성화한다.
+ *   - 이미 released 상태(already cancelled/refunded) 에서 다시 동일
+ *     전이를 하면 double-decrement 방지를 위해 복원을 건너뛴다.
+ *
+ * 모든 쓰기는 db.transaction() 으로 감싸서, 중간에 실패해도 인벤토리만
+ * 풀리고 status 는 그대로 남는 반쪽 상태가 생기지 않는다.
+ *
+ * 응답: 200 { message, booking } | 400 잘못된 status | 404 | 500
+ *
+ * 히스토리 노트: 예전 구현은 cancelled 로 바꿔도 인벤토리를 되돌리지
+ * 않아 방/티켓이 조용히 "팔린 채" 로 남는 버그가 있었다. 이 구현은
+ * 그 버그의 해결판이다.
+ */
 router.put('/:id/status', (req, res) => {
   try {
     const db = getDb();
@@ -253,13 +342,12 @@ router.put('/:id/status', (req, res) => {
       return res.status(404).json({ error: 'Booking not found.' });
     }
 
-    // Wrap all writes in a single transaction so a mid-flight failure
-    // doesn't leave inventory half-released or status inconsistent with
-    // the voucher.
+    // 모든 쓰기를 단일 트랜잭션으로 감싼다. 중간 실패 시 인벤토리만 풀리고
+    // status/바우처는 그대로 남는 불일치 상태를 방지한다.
     const updated = db.transaction(() => {
-      // Only restore inventory on the cancelled/refunded transition, and
-      // only if the booking wasn't already in a released state — that
-      // guards against double-decrement when an admin clicks cancel twice.
+      // cancelled/refunded 로 전이할 때에만 인벤토리 복원. 이미 풀린
+      // 상태였으면 복원을 건너뛰어 double-decrement 를 방지한다
+      // (관리자가 취소 버튼을 두 번 누른 경우).
       const wasReleased = booking.status === 'cancelled' || booking.status === 'refunded';
       if (!wasReleased && (status === 'cancelled' || status === 'refunded')) {
         restoreBookingInventory(db, booking);
@@ -279,10 +367,20 @@ router.put('/:id/status', (req, res) => {
   }
 });
 
-// PUT /:id/payment - update payment status.
-// All three writes (bookings.payment_status, payments.status, optional
-// bookings.status flip to 'confirmed') are wrapped in one transaction so
-// the booking and payment tables can never disagree about paid/unpaid.
+/**
+ * PUT /:id/payment — 결제 상태 동기화.
+ *
+ * Body: { payment_status, payment_id? }
+ *
+ * 세 개의 쓰기를 하나의 트랜잭션에 묶는다:
+ *   1) bookings.payment_status (선택적으로 payment_id) 갱신
+ *   2) 같은 booking 의 payments 행 status (선택적으로 stripe_payment_id) 갱신
+ *   3) 결제가 'paid' 로 바뀌었고 예약이 아직 'pending' 이었다면 자동으로
+ *      'confirmed' 로 승격
+ *
+ * 이 구조 덕분에 bookings 와 payments 두 테이블이 paid/unpaid 로 서로
+ * 엇갈려 보이는 상태가 생기지 않는다.
+ */
 router.put('/:id/payment', (req, res) => {
   try {
     const db = getDb();
@@ -298,8 +396,8 @@ router.put('/:id/payment', (req, res) => {
     }
 
     const updated = db.transaction(() => {
-      // Update the booking's denormalized payment_status (and optional
-      // payment_id pointer to the gateway reference).
+      // bookings 테이블 측의 denormalized payment_status 를 갱신.
+      // payment_id 는 결제 게이트웨이 참조 ID 를 저장하는 포인터.
       const updates = ["payment_status = ?", "updated_at = datetime('now')"];
       const values = [payment_status];
 
@@ -311,7 +409,7 @@ router.put('/:id/payment', (req, res) => {
       values.push(booking.id);
       db.prepare(`UPDATE bookings SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-      // Mirror the change on the matching payments row.
+      // 동일 변경을 payments 쪽에도 반영 — 두 테이블이 동기화된다.
       const paymentUpdates = ['status = ?'];
       const paymentValues = [payment_status];
 
@@ -323,9 +421,9 @@ router.put('/:id/payment', (req, res) => {
       paymentValues.push(booking.id);
       db.prepare(`UPDATE payments SET ${paymentUpdates.join(', ')} WHERE booking_id = ?`).run(...paymentValues);
 
-      // If the payment just flipped to 'paid' and the booking was still
-      // pending, auto-confirm it. Other states (cancelled, refunded) are
-      // intentionally left alone.
+      // 결제가 방금 'paid' 로 바뀌었고 예약이 아직 'pending' 이라면
+      // 자동으로 confirmed 로 승격. cancelled/refunded 같은 상태는
+      // 의도적으로 건드리지 않는다.
       if (payment_status === 'paid') {
         db.prepare("UPDATE bookings SET status = 'confirmed', updated_at = datetime('now') WHERE id = ? AND status = 'pending'")
           .run(booking.id);
@@ -341,9 +439,22 @@ router.put('/:id/payment', (req, res) => {
   }
 });
 
-// POST /:id/refund - process a refund.
-// Must also release the inventory the booking was holding, otherwise the
-// resort loses sellable rooms/tickets/packages forever.
+/**
+ * POST /:id/refund — 환불 처리.
+ *
+ * Body: { refund_amount? }  // 생략 시 booking.total_price 전체 환불
+ *
+ * 동작(트랜잭션):
+ *   - (아직 released 아님일 때만) 인벤토리 복원
+ *   - payments.refund_amount 세팅, payments.status = 'refunded'
+ *   - bookings.status / payment_status = 'refunded'
+ *   - vouchers.status = 'cancelled'
+ *
+ * 응답: 200 { message, booking, payment } | 400 금액 유효성 | 404 | 500
+ *
+ * 인벤토리를 함께 풀지 않으면 리조트는 "환불했는데도 판매 가능한 수량
+ * 이 줄어든 채" 남아 영원히 손해를 본다 — 반드시 복원한다.
+ */
 router.post('/:id/refund', (req, res) => {
   try {
     const db = getDb();
@@ -359,6 +470,7 @@ router.post('/:id/refund', (req, res) => {
       return res.status(404).json({ error: 'Payment record not found.' });
     }
 
+    // refund_amount 가 없으면 전체 금액 환불. 0 이하거나 총액보다 크면 거부.
     const amount = refund_amount !== undefined ? refund_amount : booking.total_price;
 
     if (amount <= 0 || amount > booking.total_price) {
@@ -366,8 +478,7 @@ router.post('/:id/refund', (req, res) => {
     }
 
     const { updated, updatedPayment } = db.transaction(() => {
-      // Only restore inventory if the booking wasn't already released by a
-      // previous cancel/refund — prevents double-decrement.
+      // 이전 cancel/refund 로 이미 풀린 상태였다면 double-decrement 방지.
       const wasReleased = booking.status === 'cancelled' || booking.status === 'refunded';
       if (!wasReleased) {
         restoreBookingInventory(db, booking);

@@ -1,13 +1,37 @@
+// ============================================================================
+// /api/admin/payments — 관리자 결제 관리 라우트
+// ----------------------------------------------------------------------------
+// 이 파일이 제공하는 엔드포인트:
+//   GET /stats         — 결제 통계 (금액/건수/상태별)
+//   GET /              — 결제 목록 (filter + pagination + booking JOIN)
+//   GET /:id           — 결제 상세 (+ 연관 booking 요약)
+//   PUT /:id/status    — 결제 상태 수정 (+ bookings.payment_status 동기화)
+//
+// 쿼리 파라미터 관례: from_date / to_date 는 YYYY-MM-DD 형식 문자열로
+// `DATE(p.created_at)` 와 비교한다. 관리자 필터 UI 가 이 이름을 그대로
+// 쓰므로 바꾸지 말 것.
+// ============================================================================
+
 const express = require('express');
 const { getDb } = require('../../config/database');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
 
 const router = express.Router();
 
-// All routes require admin authentication
+// 관리자 인증 필수.
 router.use(authenticate, requireAdmin);
 
-// GET /stats - payment statistics
+/**
+ * GET /stats — 결제 통계.
+ *
+ * 응답:
+ *   {
+ *     total_payments, total_amount, total_refunds, pending_payments,
+ *     status_breakdown: [{ status, count, total_amount }],
+ *     method_breakdown: [{ method, count, total_amount }],
+ *     today: { count, total }
+ *   }
+ */
 router.get('/stats', (req, res) => {
   try {
     const db = getDb();
@@ -50,7 +74,15 @@ router.get('/stats', (req, res) => {
   }
 });
 
-// GET / - list all payments with filters and pagination
+/**
+ * GET / — 결제 목록 (필터 + 페이지네이션).
+ *
+ * Query: { status?, method?, from_date?, to_date?, page=1, limit=20 }
+ * 응답: { payments: [...], pagination: {...} }
+ *
+ * payments 에 bookings 를 LEFT JOIN 해서 guest_name/email/booking_number
+ * 까지 한 번에 내보낸다 — 관리자 테이블 렌더링의 두 번째 round-trip 제거.
+ */
 router.get('/', (req, res) => {
   try {
     const db = getDb();
@@ -106,7 +138,11 @@ router.get('/', (req, res) => {
   }
 });
 
-// GET /:id - payment detail
+/**
+ * GET /:id — 결제 상세 (+ 연관 booking 요약 필드).
+ *
+ * 응답: 200 { payment } | 404 없음 | 500 내부 에러
+ */
 router.get('/:id', (req, res) => {
   try {
     const db = getDb();
@@ -129,7 +165,19 @@ router.get('/:id', (req, res) => {
   }
 });
 
-// PUT /:id/status - update payment status
+/**
+ * PUT /:id/status — 결제 상태를 직접 수정.
+ *
+ * Body: { status, stripe_payment_id? }
+ *
+ * 부작용:
+ *   1) payments.status (+ stripe_payment_id) 갱신
+ *   2) bookings.payment_status 도 동일 값으로 갱신
+ *   3) 'paid' 로 바뀌었고 예약이 'pending' 이었으면 자동으로 confirmed
+ *
+ * NOTE: 이 라우트는 admin/bookings.js 의 PUT /:id/payment 와 유사한
+ * 역할을 하지만 진입점이 다르다 (관리자 결제 화면에서 직접 편집).
+ */
 router.put('/:id/status', (req, res) => {
   try {
     const db = getDb();
@@ -155,10 +203,10 @@ router.put('/:id/status', (req, res) => {
     values.push(req.params.id);
     db.prepare(`UPDATE payments SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-    // Sync booking payment_status
+    // bookings.payment_status 와 동기화 — 두 테이블의 불일치 방지.
     db.prepare("UPDATE bookings SET payment_status = ?, updated_at = datetime('now') WHERE id = ?").run(status, payment.booking_id);
 
-    // If payment is confirmed as paid, set booking to confirmed
+    // 결제가 'paid' 로 확정되면 pending 예약을 confirmed 로 자동 승격.
     if (status === 'paid') {
       db.prepare("UPDATE bookings SET status = 'confirmed', updated_at = datetime('now') WHERE id = ? AND status = 'pending'").run(payment.booking_id);
     }
