@@ -446,6 +446,51 @@ function initTables(db) {
       status TEXT DEFAULT 'active',
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- ----------------------------------------------------------------------
+    -- access_codes: 특정 유저에게 특정 상품 구매 권한을 발급하는 코드
+    -- ----------------------------------------------------------------------
+    -- promotions 테이블과의 차이:
+    --   - promotions = 모든 유저에게 적용되는 일반 할인 규칙(기간/상품 한정).
+    --   - access_codes = 관리자가 "이 유저 1명에게" 특정 상품에 대한 구매
+    --     권한을 발급하는 1회성 토큰. 상품 자체의 is_restricted=1 과 짝을 이뤄,
+    --     코드 없이는 해당 상품을 예약할 수 없게 만드는 구매 게이트(purchase
+    --     gate) 기능을 제공한다.
+    --
+    -- 핵심 컬럼 의미:
+    --   code         — 사람이 복사/붙여넣기 가능한 유니크 토큰 ('ACG-XXXXXXXXXXXX').
+    --   user_id      — 이 코드가 "귀속된" 유저. 다른 유저가 같은 코드 문자열을
+    --                  들고 있어도 POST /bookings 에서 req.user.id 와 대조해 거절.
+    --   product_type,
+    --   product_id   — 어떤 상품에 대한 권한인지. hotel/ticket/package 와 id
+    --                  이 두 필드 모두 일치해야 코드가 유효하다.
+    --   max_uses     — 이 코드로 허용할 최대 예약 생성 횟수. 기본 1. 관리자가
+    --                  VIP 고객에게 "같은 방을 세 번까지 예약 가능" 같은 규칙을
+    --                  걸고 싶을 때 N > 1 로 발급한다.
+    --   current_uses — 지금까지 이 코드로 만든 예약 수(취소 시 되돌림).
+    --                  POST /bookings 트랜잭션 안에서만 ±1 된다.
+    --   valid_until  — 유효기간 만료 일시(YYYY-MM-DD). NULL = 무기한.
+    --                  검증 시점은 예약 생성 요청이 들어온 "지금" 기준.
+    --   status       — 'active' | 'exhausted' | 'revoked'
+    --                  current_uses == max_uses 면 자동으로 'exhausted' 로 전이.
+    --                  관리자가 명시적으로 무효화하면 'revoked'.
+    --   issued_by    — 발급한 관리자의 users.id (감사 로그 용).
+    CREATE TABLE IF NOT EXISTS access_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE NOT NULL,
+      user_id INTEGER NOT NULL,
+      product_type TEXT NOT NULL,
+      product_id INTEGER NOT NULL,
+      max_uses INTEGER NOT NULL DEFAULT 1,
+      current_uses INTEGER NOT NULL DEFAULT 0,
+      valid_until TEXT,
+      note TEXT,
+      status TEXT DEFAULT 'active',
+      issued_by INTEGER,
+      issued_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (issued_by) REFERENCES users(id) ON DELETE SET NULL
+    );
   `);
 
   // -- B) ALTER TABLE 배열 ---------------------------------------------------
@@ -472,6 +517,32 @@ function initTables(db) {
     //               라운드트립 없이 바로 렌더링할 수 있게 한다.
     "ALTER TABLE users ADD COLUMN google_id TEXT",
     "ALTER TABLE users ADD COLUMN avatar_url TEXT",
+
+    // -----------------------------------------------------------------
+    // Access-code 구매 게이트 관련 컬럼
+    // -----------------------------------------------------------------
+    // hotels / tickets / packages 에 is_restricted 플래그를 추가한다.
+    //   0 (기본) : 기존과 같이 누구나 예약 가능.
+    //   1        : "코드 보유자만 예약 가능". 목록/상세에서는 🔒 배지로
+    //              노출되지만, POST /bookings 는 유효한 access_code 가
+    //              함께 실려 와야만 통과시킨다.
+    // 기존 is_featured / sort_order 와 동일한 패턴을 따른다.
+    "ALTER TABLE hotels ADD COLUMN is_restricted INTEGER DEFAULT 0",
+    "ALTER TABLE tickets ADD COLUMN is_restricted INTEGER DEFAULT 0",
+    "ALTER TABLE packages ADD COLUMN is_restricted INTEGER DEFAULT 0",
+
+    // bookings 가 어떤 access_code 로 만들어졌는지를 기록한다. NULL 이
+    // 일반(코드 없는) 예약, 값이 있으면 해당 access_codes.id 를 가리킨다.
+    // 이 컬럼 하나로 "예약 취소 시 코드 current_uses 를 롤백" 같은
+    // 추적을 할 수 있어서 별도 redemption 감사 테이블이 필요 없다.
+    "ALTER TABLE bookings ADD COLUMN access_code_id INTEGER",
+
+    // (user_id, product_type, product_id) 조합으로 발급된 코드를 빠르게
+    // 찾기 위한 인덱스. 예약 생성 경로에서 매번 이 조건으로 SELECT 한다.
+    "CREATE INDEX IF NOT EXISTS idx_access_codes_user_product ON access_codes(user_id, product_type, product_id)",
+    // code 컬럼으로 lookup 할 때 UNIQUE 제약이 이미 있지만, 명시적 인덱스가
+    // 있으면 EXPLAIN 결과가 더 예측 가능해진다.
+    "CREATE INDEX IF NOT EXISTS idx_access_codes_code ON access_codes(code)",
   ];
   for (const sql of alterStatements) {
     // 이미 컬럼이 존재하면 sqlite 가 "duplicate column" 에러를 던진다.
