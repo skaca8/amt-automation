@@ -117,7 +117,12 @@
     "unitPrice": "单价",
     "roomRate": "房价",
     "requiredFieldsMissing": "请填写所有必填项。",
-    "failedToCreate": "预订创建失败。"
+    "failedToCreate": "预订创建失败。",
+    "accessCode": "访问码",
+    "accessCodeHelp": "此商品为限定商品。请输入度假村提供的访问码。",
+    "accessCodeRequired": "此商品必须使用访问码才能预订。",
+    "restrictedLoginRequired": "此商品需要登录。请使用收到访问码的账号登录。",
+    "restrictedBadge": "邀请制"
   },
   "myBookings": {
     "title": "我的预订",

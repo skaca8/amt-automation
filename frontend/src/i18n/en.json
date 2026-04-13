@@ -117,7 +117,12 @@
     "unitPrice": "Unit Price",
     "roomRate": "Room Rate",
     "requiredFieldsMissing": "Please fill in all required fields.",
-    "failedToCreate": "Failed to create booking."
+    "failedToCreate": "Failed to create booking.",
+    "accessCode": "Access Code",
+    "accessCodeHelp": "This product is restricted. Enter the access code you received from the resort.",
+    "accessCodeRequired": "An access code is required to book this product.",
+    "restrictedLoginRequired": "This product requires a login. Please sign in with the account that received the access code.",
+    "restrictedBadge": "Invite only"
   },
   "myBookings": {
     "title": "My Bookings",

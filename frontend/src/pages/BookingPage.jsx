@@ -321,6 +321,10 @@ export default function BookingPage() {
     phone: '',
     specialRequests: '',
     nationality: '',
+    // access_code: 구매 게이트 상품(is_restricted=1)에서만 노출되는 필드.
+    // 사용자가 복사해 붙여넣은 관리자 발급 코드(형식: 'ACG-XXXXXXXXXXXX').
+    // 백엔드가 POST /bookings 트랜잭션 안에서 검증/소비한다.
+    accessCode: '',
   })
 
   // 로그인된 사용자면 프로필 정보로 폼을 미리 채워 준다.
@@ -566,6 +570,19 @@ export default function BookingPage() {
       setSubmitError(t('booking.requiredFieldsMissing'))
       return
     }
+    // restricted 상품이면 access_code 가 반드시 있어야 하고 로그인 필수.
+    // 서버가 최종 판정을 하지만, 여기서 미리 막아 네트워크 왕복 없이
+    // 사용자에게 즉시 피드백을 준다.
+    if (product && product.is_restricted === 1) {
+      if (!isAuthenticated) {
+        setSubmitError(t('booking.restrictedLoginRequired'))
+        return
+      }
+      if (!form.accessCode || !form.accessCode.trim()) {
+        setSubmitError(t('booking.accessCodeRequired'))
+        return
+      }
+    }
 
     setSubmitting(true)
     setSubmitError(null)
@@ -579,6 +596,15 @@ export default function BookingPage() {
         guest_email: form.email,
         guest_phone: form.phone,
         special_requests: form.specialRequests || null,
+      }
+
+      // access_code: 상품이 is_restricted=1 이면 반드시 포함.
+      // backend 가 POST /bookings 트랜잭션 안에서 검증/소비한다.
+      // 비어 있으면 서버가 403 "required" 로 응답한다.
+      // 비-restricted 상품에 대해 코드가 와도 서버가 silent ignore 하므로
+      // 사용자 입력이 남아 있다면 일단 같이 보내도 안전하다.
+      if (form.accessCode) {
+        bookingData.access_code = form.accessCode.trim()
       }
 
       // 상품 유형별 추가 필드. 호텔은 체크인/아웃/객실/객실수, 티켓·패키지는 날짜/수량.
@@ -716,6 +742,64 @@ export default function BookingPage() {
                 onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
               />
             </div>
+
+            {/* ----------------------------------------------------------
+                 구매 게이트 블록 (is_restricted=1 상품에서만 렌더)
+               ---------------------------------------------------------
+               product.is_restricted 가 truthy 일 때만 노출된다. 분기는
+               세 가지:
+
+                 1) 비-restricted 상품  → 렌더되지 않음 (기존 동작 그대로)
+                 2) restricted + 비로그인 → 노란 배너 + 로그인 유도 메시지
+                                            (코드는 유저 identity 에 묶여
+                                             있어 비로그인 예약은 원천 차단)
+                 3) restricted + 로그인   → Access Code 입력 필드 노출
+               ---------------------------------------------------------- */}
+            {product && product.is_restricted === 1 && (
+              <div style={styles.formGroup}>
+                {!isAuthenticated ? (
+                  <div
+                    // 경고 배너 — 로그인 필요 안내. 색은 warn 톤.
+                    style={{
+                      padding: '12px 14px',
+                      border: '1px solid #f59e0b',
+                      background: '#fffbeb',
+                      color: '#92400e',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    {'\u{1F512}'} {t('booking.restrictedLoginRequired')}
+                  </div>
+                ) : (
+                  <>
+                    <label style={styles.label}>
+                      {'\u{1F512}'} {t('booking.accessCode')} *
+                    </label>
+                    <input
+                      type="text"
+                      style={styles.input}
+                      value={form.accessCode}
+                      onChange={handleInput('accessCode')}
+                      required
+                      placeholder="ACG-XXXXXXXXXXXX"
+                      // uppercase + 양끝 공백 제거는 제출 직전에 한 번 더
+                      // 한다. 여기서는 입력 UX 방해 없이 원본 그대로 둔다.
+                      onFocus={e => { e.target.style.borderColor = 'var(--primary)' }}
+                      onBlur={e => { e.target.style.borderColor = 'var(--border)' }}
+                    />
+                    <p style={{
+                      fontSize: '0.78rem',
+                      color: 'var(--text-muted)',
+                      marginTop: 6,
+                      lineHeight: 1.5,
+                    }}>
+                      {t('booking.accessCodeHelp')}
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
 
             <div style={styles.formGroup}>
               <label style={styles.label}>{t('booking.specialRequests')}</label>
