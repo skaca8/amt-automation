@@ -741,7 +741,171 @@ erDiagram
 
 ## 7. 데이터 흐름도 (DFD)
 
-<!-- TODO:SECTION-7 -->
+### 7.1 Level 0 — 시스템 경계
+
+```mermaid
+flowchart LR
+    Guest((고객<br/>외국 방문객))
+    Admin((운영자<br/>리조트 관리자))
+    Google((Google Identity<br/>Services))
+
+    subgraph System["High1 예약 플랫폼"]
+        API["🖥 Backend API<br/>+ Customer SPA<br/>+ Admin SPA"]
+    end
+
+    DB[(SQLite · 이미지 파일<br/>backend/data · backend/uploads)]
+
+    Guest -- "① 가입 · 로그인<br/>② 상품 탐색<br/>③ 예약 생성<br/>④ 바우처 조회" --> API
+    API -- "바우처 · 결과 · 이메일 코드" --> Guest
+
+    Admin -- "⑤ 로그인<br/>⑥ 상품/재고 CRUD<br/>⑦ 예약 승인/환불<br/>⑧ 통계" --> API
+    API -- "대시보드 · CSV · 상태" --> Admin
+
+    API -- "verifyIdToken<br/>(ID token 검증 요청)" --> Google
+    Google -- "서명 검증 결과" --> API
+
+    API -- "prepare · run<br/>(CRUD)" --> DB
+    DB -- "rows · 파일" --> API
+```
+
+### 7.2 Level 1 — 예약 생성 플로우 (가장 복잡한 핵심 경로)
+
+```mermaid
+flowchart TD
+    Start([고객: BookingPage 제출])
+    V1{필수 필드<br/>검증?}
+    V2{product_type<br/>∈ 3개?}
+    TX[(트랜잭션 시작)]
+    T1{상품 타입 분기}
+
+    H1[호텔: 날짜 루프<br/>room_inventory 조회]
+    H2{각 야간<br/>total_rooms − booked_rooms ≥ qty?}
+    H3[room_inventory.booked_rooms<br/>+= qty / 매일]
+    H4[총액 = Σ night_price × qty]
+
+    K1[티켓: ticket_inventory 조회]
+    K2{total − booked ≥ qty?}
+    K3[ticket_inventory.booked_quantity<br/>+= qty]
+    K4[총액 = price × qty]
+
+    P1[패키지: package_inventory 조회]
+    P2{total − booked ≥ qty?}
+    P3[package_inventory.booked_quantity<br/>+= qty]
+    P4[총액 = price × qty]
+
+    Ins1[INSERT bookings<br/>booking_number 생성]
+    Ins2[INSERT payments<br/>status=pending]
+    Ins3[INSERT vouchers<br/>code + qr_data]
+    Commit[(COMMIT + saveDb)]
+    Resp([201 booking + voucher])
+
+    Err400[throw Error with .status=400<br/>→ 트랜잭션 ROLLBACK]
+    Resp400([400 error 응답])
+
+    Start --> V1
+    V1 -- No --> Resp400
+    V1 -- Yes --> V2
+    V2 -- No --> Resp400
+    V2 -- Yes --> TX
+    TX --> T1
+
+    T1 -- hotel --> H1 --> H2
+    H2 -- No --> Err400 --> Resp400
+    H2 -- Yes --> H3 --> H4 --> Ins1
+
+    T1 -- ticket --> K1 --> K2
+    K2 -- No --> Err400
+    K2 -- Yes --> K3 --> K4 --> Ins1
+
+    T1 -- package --> P1 --> P2
+    P2 -- No --> Err400
+    P2 -- Yes --> P3 --> P4 --> Ins1
+
+    Ins1 --> Ins2 --> Ins3 --> Commit --> Resp
+```
+
+### 7.3 Level 1 — 취소 / 환불 시 재고 복원 플로우
+
+```mermaid
+flowchart LR
+    subgraph Trigger["트리거"]
+        direction TB
+        C1[고객: PUT /bookings/:id/cancel]
+        C2[관리자: PUT /admin/bookings/:id/status<br/>status=cancelled|refunded]
+        C3[관리자: POST /admin/bookings/:id/refund]
+    end
+
+    Auth{권한 검증}
+    Own{소유자/admin?}
+    TxStart[(transaction BEGIN)]
+    Released{이미 released?<br/>cancelled/refunded}
+    Restore[restoreBookingInventory<br/>각 day/qty 만큼<br/>booked_* −= MAX 0 qty]
+    Vou[UPDATE vouchers<br/>SET status = cancelled]
+    Bk[UPDATE bookings<br/>SET status = cancelled/refunded]
+    Pay[UPDATE payments<br/>refund_amount/status]
+    TxEnd[(COMMIT + saveDb)]
+    OK([200 booking])
+
+    C1 --> Auth --> Own
+    C2 --> Auth
+    C3 --> Auth
+    Own -- No --> Rej([403])
+    Own -- Yes --> TxStart --> Released
+    Released -- Yes --> Bk
+    Released -- No --> Restore --> Vou --> Bk
+    Bk --> Pay --> TxEnd --> OK
+```
+
+> **왜 이 가드가 중요한가**: 과거 admin `PUT /:id/status` 가 인벤토리를 복원하지 않아 관리자가 취소할 때마다 해당 날짜의 방/티켓이 영구적으로 "팔린 상태" 로 남는 버그가 있었습니다. 현재는 상태 전이가 `cancelled`/`refunded` 로 진입할 때 반드시 `restoreBookingInventory` 가 호출되고, 이미 released 상태에서 재호출돼도 `MAX(0, booked_* - qty)` 로 카운터가 음수가 되지 않도록 보호됩니다.
+
+### 7.4 Level 1 — 인증 플로우 (Password + Google)
+
+```mermaid
+flowchart TB
+    subgraph PW["비밀번호 플로우"]
+        PA[POST /auth/login<br/>email+password]
+        PB[bcrypt.compareSync<br/>hash 대조]
+        PC[jwt.sign<br/>HS256, 7d]
+        PD[200 token+user]
+    end
+
+    subgraph GG["Google 플로우"]
+        GA[브라우저: GIS 팝업]
+        GB[Google → ID token]
+        GC[POST /auth/google credential]
+        GD[OAuth2Client.verifyIdToken<br/>Google JWK 검증]
+        GE{email_verified?}
+        GF[google_id로 DB 조회]
+        GG_Link[이메일 일치 행에 google_id 연결]
+        GH[신규 행 INSERT<br/>password = randomHash]
+        GI[jwt.sign]
+        GJ[200 token+user]
+    end
+
+    Client[프런트엔드<br/>AuthContext]
+
+    Client --> PA --> PB --> PC --> PD --> Client
+    Client --> GA --> GB --> GC --> GD --> GE
+    GE -- No --> Rej([401])
+    GE -- Yes --> GF
+    GF -- 존재 --> GI
+    GF -- 없음 --> GG_Link
+    GG_Link -- 이메일 행 존재 --> GI
+    GG_Link -- 이메일 행 없음 --> GH --> GI
+    GI --> GJ --> Client
+
+    Client -- "localStorage.token 저장<br/>이후 Authorization: Bearer" --> Next[인증된 API 호출]
+```
+
+### 7.5 데이터 저장소 (Data Store 목록)
+
+| 스토어 | 물리 형태 | 읽기/쓰기 위치 |
+|---|---|---|
+| `high1.db` | 단일 SQLite 파일 (sql.js export → `fs.writeFileSync`) | 모든 라우트 핸들러 · seed.js |
+| `uploads/<file>` | 디스크 상 바이너리 이미지 | `routes/admin/upload.js` (multer write) · `/uploads` 정적 서빙 (read) |
+| `localStorage['token']` | 브라우저 스토리지 | 고객 `frontend/src/utils/api.js` (read/write) |
+| `localStorage['admin_token']` | 브라우저 스토리지 | 관리자 `admin/src/utils/api.js` (read/write) |
+| `localStorage['language']` | 브라우저 스토리지 | `i18n/index.js`, Header/Profile 언어 토글 |
 
 ---
 
