@@ -749,7 +749,7 @@ router.put('/room-inventory', (req, res) => {
   }
 });
 
-// PUT /ticket-inventory - bulk update ticket inventory
+/** PUT /ticket-inventory — 동일 패턴을 ticket_inventory 에 적용. */
 router.put('/ticket-inventory', (req, res) => {
   try {
     const db = getDb();
@@ -787,7 +787,7 @@ router.put('/ticket-inventory', (req, res) => {
   }
 });
 
-// PUT /package-inventory - bulk update package inventory
+/** PUT /package-inventory — 동일 패턴을 package_inventory 에 적용. */
 router.put('/package-inventory', (req, res) => {
   try {
     const db = getDb();
@@ -825,12 +825,28 @@ router.put('/package-inventory', (req, res) => {
   }
 });
 
-// POST /room-inventory/bulk - bulk set room inventory by date range
+/**
+ * POST /room-inventory/bulk — 날짜 범위 + 요일 필터 기반 일괄 설정.
+ *
+ * Body:
+ *   {
+ *     room_type_id,
+ *     start_date, end_date,       // YYYY-MM-DD
+ *     total_rooms?, price?,       // null 이면 기존 값 유지 의미
+ *     days_of_week?: number[]     // [0-6] 중 일부. 비면 모든 요일.
+ *   }
+ *
+ * 주의: total_rooms 와 price 는 null 로 넘기면 기존 row 를 유지하는
+ * "부분 업데이트" 의미가 되도록 SQL CASE 절에서 별도 처리한다. 이 때문에
+ * bind 파라미터가 반복 사용된다 (t, t, p, p).
+ */
 router.post('/room-inventory/bulk', (req, res) => {
   try {
     const db = getDb();
     const { room_type_id, start_date, end_date, total_rooms, price, days_of_week } = req.body;
-    // days_of_week is optional array of 0-6 (0=Sunday). If not provided, apply to all days.
+    // days_of_week: 0-6 정수 배열(0 = 일요일). 비어 있거나 생략되면
+    // 모든 요일에 적용된다. "주말만 가격 올리기" 같은 유스케이스를
+    // 지원하기 위한 필터.
 
     if (!room_type_id || !start_date || !end_date) {
       return res.status(400).json({ error: 'room_type_id, start_date, and end_date are required.' });
@@ -870,7 +886,7 @@ router.post('/room-inventory/bulk', (req, res) => {
   }
 });
 
-// POST /ticket-inventory/bulk - bulk set ticket inventory by date range
+/** POST /ticket-inventory/bulk — 날짜 범위 기반 일괄 설정 (티켓). 패턴 동일. */
 router.post('/ticket-inventory/bulk', (req, res) => {
   try {
     const db = getDb();
@@ -914,7 +930,7 @@ router.post('/ticket-inventory/bulk', (req, res) => {
   }
 });
 
-// POST /package-inventory/bulk - bulk set package inventory by date range
+/** POST /package-inventory/bulk — 날짜 범위 기반 일괄 설정 (패키지). */
 router.post('/package-inventory/bulk', (req, res) => {
   try {
     const db = getDb();
