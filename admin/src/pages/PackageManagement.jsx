@@ -1,3 +1,23 @@
+// ============================================================================
+// Admin — 패키지(번들 상품) 관리 페이지 PackageManagement
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) 패키지 상품 목록 CRUD. 패키지는 "여러 하위 상품을 묶은 번들" 이다.
+//   2) 패키지 내부의 items 배열을 편집. 각 item 은
+//      { type: 'hotel'|'ticket', ref_id: <id>, room_type_id?, quantity }
+//      형태로, 패키지가 판매될 때 포함되는 하위 상품을 가리킨다.
+//   3) 편집 폼을 위해 호텔/티켓/객실 타입 목록을 미리 가져와 드롭다운을 구성.
+//      (loadProductOptions 에서 병렬로 조회한다.)
+//   4) 재고/프로모션 관리 임베드 컴포넌트와 연동.
+//
+// 렌더링 위치: /products/packages 라우트.
+//
+// 주의:
+//   - loadProductOptions 는 호텔/티켓 2번 + 각 호텔마다 객실 타입 1번씩
+//     (N+2) 회의 요청을 순차 수행한다. 호텔이 많아지면 느려질 수 있으므로
+//     추후 단일 bulk 엔드포인트로 최적화하는 것을 고려할 것.
+// ============================================================================
+
 import React, { useState, useEffect, useCallback } from 'react'
 import { get, post, put, del } from '../utils/api'
 import StatusBadge from '../components/StatusBadge'
@@ -7,13 +27,21 @@ import RichTextEditor from '../components/RichTextEditor'
 import BulkInventoryManager from '../components/BulkInventoryManager'
 import PromotionManager from '../components/PromotionManager'
 
+// 신규 패키지 폼의 초기값. items 는 배열이며 폼에서 push/remove 한다.
 const emptyPackage = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
   price: '', status: 'active', items: [], images: [],
   is_featured: 0, sort_order: 0,
 }
 
+/**
+ * PackageManagement — 패키지(번들) 상품 CRUD + 구성 아이템 편집.
+ *
+ * 부작용: /admin/products/packages 및 /admin/products/featured GET/POST/PUT/DELETE.
+ * loadProductOptions 단계에서 hotels/tickets/room-types 도 추가 조회.
+ */
 export default function PackageManagement() {
+  // 목록/폼 기본 상태.
   const [packages, setPackages] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -21,15 +49,18 @@ export default function PackageManagement() {
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({ ...emptyPackage })
   const [saving, setSaving] = useState(false)
+
+  // items 드롭다운 옵션용 — 패키지 구성품으로 선택 가능한 호텔/티켓/객실 목록.
+  // hotelRooms 는 { [hotelId]: RoomType[] } 형태의 맵.
   const [hotels, setHotels] = useState([])
   const [tickets, setTickets] = useState([])
   const [hotelRooms, setHotelRooms] = useState({})
 
-  // Inventory modal state
+  // 재고 모달 상태
   const [showInventoryModal, setShowInventoryModal] = useState(false)
   const [inventoryPkg, setInventoryPkg] = useState(null)
 
-  // Promotions modal state
+  // 프로모션 모달 상태
   const [showPromotionsModal, setShowPromotionsModal] = useState(false)
   const [promotionsPkg, setPromotionsPkg] = useState(null)
 
@@ -73,6 +104,13 @@ export default function PackageManagement() {
     }
   }
 
+  // ----------------------------------------------------------------------
+  // loadProductOptions — items 드롭다운에 넣을 모든 옵션을 미리 가져온다.
+  //   1) 호텔 목록 + 티켓 목록 병렬 fetch.
+  //   2) 각 호텔마다 객실 타입을 순차 fetch 해 { hotelId: rooms[] } 맵을 만든다.
+  // 병렬 대신 순차인 이유: 호텔이 수십 개 이상이면 동시 요청이 백엔드에
+  // 부담을 줄 수 있고, 사용자 화면에는 loading 중 스피너가 이미 떠 있다.
+  // ----------------------------------------------------------------------
   const loadProductOptions = async () => {
     try {
       const [h, t] = await Promise.all([
@@ -90,12 +128,13 @@ export default function PackageManagement() {
           const roomRes = await get(`/admin/products/room-types?hotel_id=${hid}`)
           roomMap[hid] = roomRes.room_types || roomRes.rooms || roomRes.data || []
         } catch {
+          // 특정 호텔의 객실 조회 실패는 빈 배열로 대체. 전체 로딩을 깨지 않는다.
           roomMap[hid] = []
         }
       }
       setHotelRooms(roomMap)
     } catch {
-      // Silently handle
+      // 전체 실패 시에도 조용히 무시. 드롭다운이 비게 되지만 에러 배너는 안 띄운다.
     }
   }
 
@@ -122,6 +161,7 @@ export default function PackageManagement() {
     setShowModal(true)
   }
 
+  // 저장. 티켓과 마찬가지로 UI 의 'price' → 서버의 'base_price' 로 매핑.
   const savePackage = async () => {
     setSaving(true)
     try {
@@ -150,6 +190,8 @@ export default function PackageManagement() {
     }
   }
 
+  // ---------- 패키지 구성 items 편집 헬퍼 ----------
+  // 새 아이템 추가. 기본 타입은 호텔, 기본 수량 1.
   const addItem = () => {
     setForm({
       ...form,
@@ -157,6 +199,9 @@ export default function PackageManagement() {
     })
   }
 
+  // 인덱스 기반 필드 업데이트. type 이 바뀌면 product_id / room_type_id 를
+  // 초기화한다 — 이전 타입에서 선택한 id 가 다음 타입 드롭다운에 남으면
+  // 유효하지 않은 참조가 되기 때문이다.
   const updateItem = (index, field, value) => {
     const updated = [...form.items]
     updated[index] = { ...updated[index], [field]: value }
@@ -167,6 +212,7 @@ export default function PackageManagement() {
     setForm({ ...form, items: updated })
   }
 
+  // 인덱스 기반 아이템 제거.
   const removeItem = (index) => {
     setForm({ ...form, items: form.items.filter((_, i) => i !== index) })
   }

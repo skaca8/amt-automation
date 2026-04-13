@@ -1,3 +1,22 @@
+// ============================================================================
+// Admin — 로그인 페이지 Login
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) 관리자 이메일/비밀번호 입력 폼을 렌더링한다.
+//   2) 제출 시 AuthContext.login() 을 호출한다. 성공하면 AuthProvider 가
+//      user state 를 채우고, App.jsx 의 Route 가 자동으로 /login 을 / 로
+//      리다이렉트 해 준다(이 컴포넌트에서 직접 navigate 하지 않는다).
+//   3) 실패 시 상단에 빨간색 에러 배너를 표시한다.
+//
+// 렌더링 위치: App.jsx 의 "/login" 라우트. ProtectedRoute 바깥에 있다.
+//
+// 주의:
+//   - 실제 토큰 저장·role 검증은 AuthContext.login 내부에서 처리된다.
+//     이 컴포넌트는 순수 입력 UI + 에러 표시 책임만 가진다.
+//   - 이미 로그인된 상태에서 /login 으로 오는 경우는 App.jsx 에서 이미
+//     Navigate 로 끊어 주기 때문에 여기서는 신경 쓸 필요 없다.
+// ============================================================================
+
 import React, { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 
@@ -93,13 +112,27 @@ const styles = {
   },
 }
 
+/**
+ * Login — 관리자 로그인 폼 페이지.
+ *
+ * Props: 없음.
+ *
+ * 반환 UI: 가운데 정렬 카드 + 이메일/비밀번호 입력 + 제출 버튼.
+ *
+ * 부작용:
+ *   - AuthContext.login() 호출 → /api/auth/login POST, localStorage 쓰기.
+ *   - 성공 후 라우트 리다이렉트는 App.jsx 가 수행하므로 여기서는 state 만 정리.
+ */
 export default function Login() {
   const { login } = useAuth()
+  // email / password    : 입력 필드의 controlled state
+  // error / loading     : 제출 결과에 따라 토글되는 UI 상태
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  // 폼 제출 핸들러. 필수값 체크 후 login 호출, 실패 시 에러를 state 에 저장.
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')

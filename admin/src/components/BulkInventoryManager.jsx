@@ -281,14 +281,20 @@ const styles = {
   },
 }
 
+// 재고 비율에 따른 행 배경색. 시각적으로 일별 판매 상태를 한눈에 파악.
+//   total <= 0  : 재고 미설정(회색)
+//   booked/total >= 1   : 완판(빨강)
+//   booked/total >= 0.7 : 70% 이상 소진(노랑)
+//   그 외                : 여유(연두)
 function getRowStyle(booked, total) {
-  if (total <= 0) return { background: '#f8fafc', color: '#94a3b8' } // gray - no inventory
+  if (total <= 0) return { background: '#f8fafc', color: '#94a3b8' } // gray - 재고 없음
   const ratio = booked / total
-  if (ratio >= 1) return { background: '#fef2f2' } // red - fully booked
-  if (ratio >= 0.7) return { background: '#fffbeb' } // yellow - >70%
-  return { background: '#f0fdf4' } // green - available
+  if (ratio >= 1) return { background: '#fef2f2' } // red - 완판
+  if (ratio >= 0.7) return { background: '#fffbeb' } // yellow - 70% 이상 판매
+  return { background: '#f0fdf4' } // green - 여유 있음
 }
 
+// 상태 배지 라벨과 색. getRowStyle 과 동일한 임계값을 사용한다.
 function getStatusInfo(booked, total) {
   if (total <= 0) return { label: 'No Stock', bg: '#f1f5f9', color: '#64748b' }
   const ratio = booked / total
@@ -297,11 +303,37 @@ function getStatusInfo(booked, total) {
   return { label: 'Available', bg: '#dcfce7', color: '#22c55e' }
 }
 
+/**
+ * BulkInventoryManager — 상품 재고의 대량 설정 + 달력 뷰.
+ *
+ * Props:
+ *   - productType : 'room' | 'ticket' | 'package'
+ *   - productId   : 대상 엔티티 id
+ *   - onSave      : 저장 성공 후 부모에게 알리는 콜백 (선택)
+ *
+ * 반환 UI:
+ *   - Section A: 시작일/종료일/가격/수량/요일 선택 → 대량 적용 버튼
+ *   - Section B: 선택한 기간의 일별 재고 표. 각 행 인라인 편집 가능.
+ *
+ * 부작용:
+ *   - /admin/products/{type}-inventory/* 경로에 GET/PUT/POST 요청.
+ *   - 저장 후 loadInventory() 를 재호출해 표를 갱신.
+ *   - onSave 콜백이 제공되면 저장 완료 시 호출.
+ */
 export default function BulkInventoryManager({ productType, productId, onSave }) {
+  // 사용자에게 보여 줄 수량 필드 라벨(객실은 Rooms, 그 외는 Quantity).
   const typeLabel = productType === 'room' ? 'Rooms' : 'Quantity'
+  // 백엔드에 넘길 id 필드명. 상품 타입별로 이름이 다르기 때문에 한 번만 계산.
   const idField = productType === 'room' ? 'room_type_id' : productType === 'ticket' ? 'ticket_id' : 'package_id'
 
-  // Bulk set state
+  // -------------------------------------------------------------------
+  // Section A (Bulk Set) 상태
+  //   - bulkStart/End    : 적용 기간 (오늘~+30일 기본)
+  //   - bulkPrice        : 단가. 빈 값이면 가격을 건드리지 않는다.
+  //   - bulkQuantity     : 총 재고. 빈 값이면 재고를 건드리지 않는다.
+  //   - daysOfWeek       : 적용할 요일 인덱스 배열 (0=월 ~ 6=일). 기본 전체.
+  //   - bulkLoading/Message: 저장 중 상태 + 성공/실패 메시지.
+  // -------------------------------------------------------------------
   const [bulkStart, setBulkStart] = useState(todayStr())
   const [bulkEnd, setBulkEnd] = useState(addDays(todayStr(), 30))
   const [bulkPrice, setBulkPrice] = useState('')
@@ -310,7 +342,13 @@ export default function BulkInventoryManager({ productType, productId, onSave })
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkMessage, setBulkMessage] = useState(null)
 
-  // Inventory table state
+  // -------------------------------------------------------------------
+  // Section B (Inventory Table) 상태
+  //   - viewStart/End : 표시할 달력 범위 (오늘~+60일 기본)
+  //   - inventory     : 서버에서 받은 재고 행 배열
+  //   - editingRow    : 현재 인라인 편집 중인 행 인덱스. null 이면 비편집 모드.
+  //   - editValues    : 편집 중인 price / quantity 임시 값
+  // -------------------------------------------------------------------
   const [viewStart, setViewStart] = useState(todayStr())
   const [viewEnd, setViewEnd] = useState(addDays(todayStr(), 60))
   const [inventory, setInventory] = useState([])
@@ -318,24 +356,30 @@ export default function BulkInventoryManager({ productType, productId, onSave })
   const [editingRow, setEditingRow] = useState(null)
   const [editValues, setEditValues] = useState({ price: '', quantity: '' })
 
+  // 서버에서 재고 목록을 가져온다. viewStart/End 또는 productId 변경 시 재호출.
+  // useCallback 으로 묶는 이유는 이후 useEffect deps 에서 안정적으로 참조하기 위해.
   const loadInventory = useCallback(async () => {
     if (!productId) return
     setTableLoading(true)
     try {
+      // 백엔드가 inventory / data / 배열 루트 중 하나로 응답할 수 있어 순차 fallback.
       const endpoint = `/admin/products/${productType}-inventory/${productId}?from_date=${viewStart}&to_date=${viewEnd}`
       const res = await get(endpoint)
       setInventory(res.inventory || res.data || res || [])
     } catch {
+      // 실패해도 에러를 띄우지 않고 빈 배열로 대체 → "데이터 없음" 뷰가 뜬다.
       setInventory([])
     } finally {
       setTableLoading(false)
     }
   }, [productType, productId, viewStart, viewEnd])
 
+  // loadInventory 가 바뀌면 자동 호출. deps 가 내부적으로 productType/productId/viewStart/viewEnd.
   useEffect(() => {
     loadInventory()
   }, [loadInventory])
 
+  // 요일 선택 토글. 포함돼 있으면 제거, 없으면 추가 후 정렬.
   const toggleDay = (dayIndex) => {
     if (daysOfWeek.includes(dayIndex)) {
       setDaysOfWeek(daysOfWeek.filter((d) => d !== dayIndex))
@@ -344,6 +388,11 @@ export default function BulkInventoryManager({ productType, productId, onSave })
     }
   }
 
+  // ----------------------------------------------------------------------
+  // applyBulk — Section A 의 설정을 백엔드 bulk 엔드포인트로 POST.
+  // price 와 quantity 는 각각 빈 문자열이면 body 에 넣지 않아, 서버가
+  // "건드리지 말라" 고 해석하도록 한다. 둘 다 비어 있으면 사용자에게 안내.
+  // ----------------------------------------------------------------------
   const applyBulk = async () => {
     if (!bulkStart || !bulkEnd) {
       alert('Please select start and end dates.')
@@ -366,12 +415,15 @@ export default function BulkInventoryManager({ productType, productId, onSave })
         body.price = Number(bulkPrice)
       }
       if (bulkQuantity !== '') {
+        // 객실 타입과 나머지는 필드명이 다르다: total_rooms vs total_quantity.
         body[productType === 'room' ? 'total_rooms' : 'total_quantity'] = Number(bulkQuantity)
       }
 
       const res = await post(`/admin/products/${productType}-inventory/bulk`, body)
+      // 응답 스키마가 updated_count / count / updated 셋 중 하나로 올 수 있어 fallback.
       const count = res.updated_count || res.count || res.updated || 'multiple'
       setBulkMessage({ type: 'success', text: `Successfully updated ${count} date(s).` })
+      // 적용 후 달력 뷰 즉시 갱신.
       loadInventory()
       if (onSave) onSave()
     } catch (err) {
@@ -381,6 +433,8 @@ export default function BulkInventoryManager({ productType, productId, onSave })
     }
   }
 
+  // 인라인 편집 시작: 현재 행의 price/quantity 값을 편집 폼에 로드.
+  // quantity 는 응답 스키마 혼란을 흡수하기 위해 세 가지 필드명을 순차 시도.
   const startEdit = (inv, index) => {
     setEditingRow(index)
     setEditValues({
@@ -389,11 +443,20 @@ export default function BulkInventoryManager({ productType, productId, onSave })
     })
   }
 
+  // 편집 취소: 인덱스와 임시 값을 모두 초기화.
   const cancelEdit = () => {
     setEditingRow(null)
     setEditValues({ price: '', quantity: '' })
   }
 
+  // ----------------------------------------------------------------------
+  // saveEdit — 단일 날짜에 대한 편집 값을 저장한다.
+  //   1차: PUT /admin/products/{type}-inventory  (items 배열로 한 개 날짜)
+  //   실패하면 fallback 으로 POST .../bulk 엔드포인트에 start=end=해당날짜,
+  //   days_of_week 전체를 넘겨 같은 결과를 내도록 한다.
+  //   이중 경로인 이유: 프로젝트 초기 PUT 엔드포인트가 일부 환경에서 404 를
+  //   돌려주는 회귀가 있었고, 재배포 전에 프런트에서 안전 폴백을 넣어 뒀다.
+  // ----------------------------------------------------------------------
   const saveEdit = async (inv) => {
     try {
       const typeIdField = productType === 'room' ? 'room_type_id' : productType === 'ticket' ? 'ticket_id' : 'package_id'
@@ -408,7 +471,7 @@ export default function BulkInventoryManager({ productType, productId, onSave })
       try {
         await put(`/admin/products/${productType}-inventory`, body)
       } catch {
-        // Fallback to bulk endpoint with single-day range
+        // 1차 PUT 실패 → bulk 엔드포인트에 start=end=해당일로 우회.
         const fallback = {
           [idField]: productId,
           start_date: formatDate(inv.date),
@@ -429,11 +492,14 @@ export default function BulkInventoryManager({ productType, productId, onSave })
     }
   }
 
+  // Enter 로 저장, Esc 로 취소. 인라인 편집 UX 표준.
   const handleEditKeyDown = (e, inv) => {
     if (e.key === 'Enter') saveEdit(inv)
     if (e.key === 'Escape') cancelEdit()
   }
 
+  // JS Date.getDay() 는 일요일이 0. 우리 DAY_KR/DAY_NAMES 는 월요일 시작.
+  // 그래서 0(일) → 6 으로 매핑하고 나머지는 -1 로 시프트한다.
   const getDayKr = (dateStr) => {
     const d = new Date(dateStr)
     const jsDay = d.getDay() // 0=Sun

@@ -1,6 +1,28 @@
+// ============================================================================
+// Admin — 설정 페이지 Settings
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) 관리자 본인 프로필(이름/이메일/역할/전화) 표시 (읽기 전용).
+//   2) 비밀번호 변경 폼 (현재 API 는 미구현, 제출 시 안내 메시지만 표시).
+//   3) 플랫폼 전역 설정(플랫폼명/언어/통화/타임존) - 현재 전부 disabled.
+//   4) 알림 토글 UI - 현재 disabled (읽기 전용 프리뷰).
+//
+// 렌더링 위치: /settings 라우트. 사이드바 맨 아래 메뉴.
+//
+// 주의:
+//   - 실제 저장 로직이 백엔드에 아직 없어 대부분 UI 가 disabled 이거나
+//     TODO 주석만 달려 있다. 추후 API 가 생기면 handlePasswordChange 안의
+//     TODO 부분을 실제 호출로 교체하면 된다.
+// ============================================================================
+
 import React, { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 
+/**
+ * Settings — 관리자 본인 계정/시스템 설정 페이지.
+ *
+ * 부작용: 현재 없음. 추후 API 연결 시 /api/admin/profile 등을 호출하게 될 것.
+ */
 export default function Settings() {
   const { user } = useAuth()
   const [passwordForm, setPasswordForm] = useState({
