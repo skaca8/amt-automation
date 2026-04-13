@@ -306,6 +306,124 @@ router.get('/:id', (req, res) => {
   }
 });
 
+// 관리자가 수정 가능한 상태 값. 'active' ↔ 'revoked' 두 방향만 허용.
+// 'exhausted' 는 current_uses == max_uses 일 때 시스템이 자동으로
+// 설정하는 derived 상태이므로 관리자가 직접 지정할 수 없다.
+const ADMIN_ASSIGNABLE_STATUSES = ['active', 'revoked'];
+
+/**
+ * PUT /:id — access code 부분 수정.
+ *
+ * 수정 가능한 필드 (전부 optional — null 이나 undefined 는 무시):
+ *   - note         : 관리자 메모 문자열
+ *   - max_uses     : 허용 사용 횟수 상한. current_uses 보다 작게 내릴 수
+ *                    없다 (이미 소비한 양보다 작은 상한은 부정합).
+ *   - valid_until  : 유효기간. null 로 보내면 "무기한" 으로 해제.
+ *   - status       : 'active' | 'revoked'
+ *
+ * 의도적으로 수정 금지:
+ *   - code, user_id, product_type, product_id, current_uses, issued_by,
+ *     issued_at
+ *   → 이 필드들은 발급 시점의 신원/대상을 고정한다. 바꿔야 하면 새 코드를
+ *     발급하는 게 올바른 워크플로.
+ *
+ * 응답: 200 { message, access_code }
+ *       400 max_uses < current_uses / 잘못된 status
+ *       404 없는 id
+ */
+router.put('/:id', (req, res) => {
+  try {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM access_codes WHERE id = ?').get(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Access code not found.' });
+    }
+
+    const { note, max_uses, valid_until, status } = req.body || {};
+
+    // SET 절을 동적으로 조립. 명시적으로 전달된 필드만 포함해서
+    // "부분 업데이트" 의미를 유지한다.
+    const sets = [];
+    const values = [];
+
+    if (note !== undefined) {
+      sets.push('note = ?');
+      values.push(note);
+    }
+    if (max_uses !== undefined) {
+      const n = Number(max_uses);
+      if (!Number.isFinite(n) || n < 1) {
+        return res.status(400).json({ error: 'max_uses must be an integer >= 1.' });
+      }
+      if (n < existing.current_uses) {
+        // 이미 소비한 횟수보다 상한을 낮추면 "초과 소비" 상태가 돼 버린다.
+        return res.status(400).json({
+          error: `max_uses cannot be lower than current_uses (${existing.current_uses}).`,
+        });
+      }
+      sets.push('max_uses = ?');
+      values.push(Math.floor(n));
+    }
+    if (valid_until !== undefined) {
+      // null / '' 을 "만료일 해제" 로 해석한다. 실제 날짜 유효성 검증은
+      // 예약 생성 경로에서 Date.parse 로 수행.
+      sets.push('valid_until = ?');
+      values.push(valid_until || null);
+    }
+    if (status !== undefined) {
+      if (!ADMIN_ASSIGNABLE_STATUSES.includes(status)) {
+        return res.status(400).json({
+          error: `status must be one of: ${ADMIN_ASSIGNABLE_STATUSES.join(', ')}.`,
+        });
+      }
+      sets.push('status = ?');
+      values.push(status);
+    }
+
+    if (sets.length === 0) {
+      // 관리자가 아무 필드도 안 보내면 수정할 게 없다. 멱등적으로 200.
+      return res.json({ message: 'No fields to update.', access_code: existing });
+    }
+
+    values.push(existing.id);
+    db.prepare(`UPDATE access_codes SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+
+    const updated = db.prepare('SELECT * FROM access_codes WHERE id = ?').get(existing.id);
+    res.json({ message: 'Access code updated.', access_code: updated });
+  } catch (err) {
+    console.error('Admin update access code error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+/**
+ * DELETE /:id — soft revoke.
+ *
+ * row 를 실제로 지우지 않고 status='revoked' 로 전환한다. 감사 로그 /
+ * 이력 추적 용도로 과거 발급 기록을 DB 에 남겨야 하기 때문.
+ * 이미 revoked 인 코드를 다시 DELETE 해도 멱등적으로 200.
+ *
+ * 응답: 200 { message, access_code }
+ *       404 없는 id
+ */
+router.delete('/:id', (req, res) => {
+  try {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM access_codes WHERE id = ?').get(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Access code not found.' });
+    }
+
+    db.prepare("UPDATE access_codes SET status = 'revoked' WHERE id = ?").run(existing.id);
+    const updated = db.prepare('SELECT * FROM access_codes WHERE id = ?').get(existing.id);
+
+    res.json({ message: 'Access code revoked.', access_code: updated });
+  } catch (err) {
+    console.error('Admin revoke access code error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 module.exports = router;
 // generateAccessCode 를 바깥으로도 노출해 후속 커밋에서 재사용할 여지를
 // 둔다(예: 대량 생성 스크립트). 현재 정상 경로는 POST / 안에서만 호출.
