@@ -1,3 +1,18 @@
+// ============================================================================
+// SingleDatePicker — 단일 날짜 선택기
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - DateRangePicker 의 단일 날짜 버전. 한 번 클릭해서 날짜 하나만 고른다.
+//   - 값은 'YYYY-MM-DD' 문자열로만 입출력한다.
+//   - minDate 이전은 비활성. 선택 직후 150ms 뒤 팝업 자동 닫기.
+//
+// 사용처: SearchBar(티켓/패키지 탭), TicketDetail, PackageDetail.
+//
+// 주의:
+//   - parseDate 는 로컬 타임존으로 복원해 타임존 경계 버그를 피한다.
+//   - DateRangePicker 와 날짜 유틸을 의도적으로 중복 유지(작은 피커 단독 재사용).
+// ============================================================================
+
 import React, { useState, useMemo } from 'react'
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -88,6 +103,17 @@ const styles = {
   },
 }
 
+/**
+ * 단일 날짜 피커(Controlled).
+ *
+ * @param {object} props
+ * @param {string} props.value       - 'YYYY-MM-DD' 선택된 날짜
+ * @param {Function} props.onChange  - 새 값을 받아가는 콜백
+ * @param {string} [props.placeholder]
+ * @param {string} [props.minDate]   - 선택 가능한 최소일. 기본 오늘.
+ *
+ * 부작용: 선택 직후 setTimeout 으로 팝업 자동 닫기, onChange 호출.
+ */
 export default function SingleDatePicker({ value, onChange, placeholder, minDate }) {
   const [open, setOpen] = useState(false)
   const [viewMonth, setViewMonth] = useState(() => {

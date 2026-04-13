@@ -1,3 +1,20 @@
+// ============================================================================
+// Register — 회원가입 페이지 (/register)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 이름/이메일/비밀번호(+확인)/전화/국적 폼을 받아 AuthContext.register
+//     를 호출한다. 성공 시 홈으로 이동.
+//   - 비밀번호 확인 불일치는 제출 전에 로컬에서 막는다.
+//   - Google 소셜 가입도 같이 제공한다. Google 플로우는 "가입 vs 로그인" 이
+//     동일하므로 loginWithGoogle 을 그대로 재사용한다(백엔드가 최초 진입 시
+//     사용자 행을 upsert 해 주는 구조).
+//
+// 렌더 위치: /register. lazy-loaded.
+//
+// 주의:
+//   - GoogleSignInButton 콜백은 반드시 useCallback. Login.jsx 와 동일 이유.
+// ============================================================================
+
 import React, { useState, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -111,6 +128,10 @@ const styles = {
   },
 }
 
+/**
+ * 회원가입 페이지.
+ * 부작용: register() 성공 시 navigate('/'), Google 플로우도 동일.
+ */
 export default function Register() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -157,9 +178,9 @@ export default function Register() {
     }
   }
 
-  // The Google flow is the same on Register as on Login — a Google
-  // sign-up just creates the user row on first visit, so reusing
-  // loginWithGoogle keeps the UX consistent.
+  // Register 에서의 Google 플로우는 Login 과 동일하다. 최초 방문에서 백엔드가
+  // 사용자 행을 upsert 하므로 별도 register-with-google 엔드포인트가 필요 없다.
+  // UX 일관성을 위해 loginWithGoogle 을 그대로 재사용한다.
   const handleGoogleCredential = useCallback(async (credential) => {
     setError(null)
     setGoogleLoading(true)
@@ -285,9 +306,8 @@ export default function Register() {
           </button>
         </form>
 
-        {/* Google sign-up. Uses the same component + handler as Login
-            because Google's ID-token flow creates-or-returns the user
-            row on the backend in a single call. */}
+        {/* 구글 가입. Login 과 동일한 컴포넌트+핸들러를 쓴다. 이유는 위의
+            handleGoogleCredential 주석 참고(백엔드가 한 번의 호출로 upsert). */}
         <div style={styles.divider}>
           <span style={styles.dividerLine} />
           <span style={styles.dividerText}>{t('auth.orDivider')}</span>

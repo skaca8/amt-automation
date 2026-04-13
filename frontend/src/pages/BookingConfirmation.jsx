@@ -1,11 +1,30 @@
+// ============================================================================
+// BookingConfirmation — 예약 완료 페이지 (/booking/confirmation/:bookingId)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 방금 생성된 예약 1건을 /bookings/:id 로 다시 조회해 예약 번호, 상품,
+//     날짜, 수량, 총액, 상태, 바우처 코드를 카드 형태로 보여 준다.
+//   - 비로그인 예약도 완료 화면으로 넘어오기 때문에, BookingPage 가 URL 쿼리
+//     로 넘겨 준 guest_email 을 그대로 서버로 전달해 ownership 검증을 통과시킨다.
+//
+// 렌더 위치: /booking/confirmation/:bookingId. lazy-loaded.
+//
+// 주의:
+//   - 백엔드 응답은 { booking, voucher, payment, product, room_type } 이며
+//     booking 의 모든 컬럼명은 snake_case(sql.js row 직결).
+//   - 응답에서 guest_email 소지자 확인이 실패하면 404/403 을 돌려주는데,
+//     이 페이지는 그 경우 단순 에러 메시지만 표시한다.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { get } from '../utils/api'
 
-// Picks the locale-appropriate field off a backend product record.
-// Falls back to the English value so callers still see content when a
-// row is missing its `_cn` translation.
+/**
+ * 백엔드 상품 객체에서 현재 언어에 맞는 필드를 골라 읽는다.
+ * _cn 번역이 비어 있으면 _en 으로 fallback. (BookingPage 와 동일한 정책.)
+ */
 function pickLocalized(obj, field, lang) {
   if (!obj) return ''
   const key = `${field}_${lang === 'cn' ? 'cn' : 'en'}`
@@ -156,6 +175,16 @@ const styles = {
   },
 }
 
+/**
+ * 예약 완료 페이지.
+ *
+ * 내부 state:
+ *   - data    : { booking, voucher, payment, product, room_type } 응답 전체
+ *   - loading : 초기 조회 스피너
+ *   - error   : 조회 실패 메시지
+ *
+ * 부작용: 마운트 시 /bookings/:id (+ guest_email 쿼리) GET.
+ */
 export default function BookingConfirmation() {
   const { bookingId } = useParams()
   const [searchParams] = useSearchParams()
@@ -170,9 +199,9 @@ export default function BookingConfirmation() {
     const fetchBooking = async () => {
       setLoading(true)
       try {
-        // Backend /bookings/:id now requires either an authenticated owner
-        // or a matching `guest_email` query param — BookingPage forwards
-        // the email via the URL so guest flows still work.
+        // 백엔드 /bookings/:id 는 로그인된 소유자이거나 guest_email 쿼리가
+        // 일치해야 응답을 돌려 준다. BookingPage 에서 결제 직후 URL 로
+        // email 을 넘겨 주므로 비회원 예약도 이 페이지가 정상 동작한다.
         const emailParam = searchParams.get('email')
         const url = emailParam
           ? `/bookings/${bookingId}?guest_email=${encodeURIComponent(emailParam)}`
@@ -204,14 +233,14 @@ export default function BookingConfirmation() {
     )
   }
 
-  // Backend response shape: { booking, voucher, payment, product, room_type }.
-  // All booking columns are snake_case because they come straight from the
-  // sqlite row.
+  // 백엔드 응답 shape: { booking, voucher, payment, product, room_type }.
+  // booking 내부 모든 컬럼은 sqlite row 에서 직접 오기 때문에 snake_case 다.
   const booking = data?.booking || null
   const voucher = data?.voucher || booking?.voucher || null
   const product = data?.product || null
   const roomType = data?.room_type || null
 
+  // UI 에 보여줄 파생 값. 빈 응답이어도 안전하게 '-' 로 fallback 되도록 준비.
   const bkn = booking?.booking_number || bookingId
   const voucherCode = voucher?.code || ''
   const productName = pickLocalized(product, 'name', lang)

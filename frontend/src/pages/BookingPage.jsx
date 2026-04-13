@@ -1,21 +1,54 @@
+// ============================================================================
+// BookingPage — 예약 입력 페이지 (/booking/:type/:id)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - URL 파라미터 :type('hotel'|'ticket'|'package') 과 :id, 그리고 상세
+//     페이지에서 넘어온 쿼리(checkIn/checkOut/roomType/date/quantity)를
+//     읽어 해당 상품을 fetch 한다.
+//   - 호텔 응답은 { hotel, room_types } 형태이므로 room_types 를 hotel
+//     객체로 평탄화해 이후 코드가 한 군데만 보면 되도록 정규화한다.
+//   - 고객 정보 입력 폼(이름/이메일/전화/국적/특이사항)을 받고 요약 카드
+//     에 상품/날짜/인원/총액을 실시간 표시한다.
+//   - 제출 시 백엔드 스펙에 맞춘 snake_case payload 를 POST /bookings 로
+//     전송하고, 성공하면 confirmation 페이지로 guest_email 과 함께 이동.
+//
+// 렌더 위치: /booking/:type/:id 라우트. lazy-loaded.
+//
+// 주의:
+//   - 백엔드(bookings.js)는 strict snake_case 계약이다(e504ce7 정합화).
+//     product_type, product_id, guest_name, guest_email, check_in, check_out,
+//     room_type_id, visit_date, quantity, special_requests — 한 필드라도
+//     camelCase 로 보내면 즉시 400.
+//   - sql.js 백엔드는 정수 id 만 쓰므로 result.booking?.id 또는 result.id
+//     둘 다 허용한다. '_id' 는 없다.
+//   - 로그인 상태가 아니어도 예약을 받을 수 있다. 그래서 confirmation URL
+//     에 guest_email 을 쿼리로 넘겨 ownership 검증에 쓰도록 한다.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import { get, post } from '../utils/api'
 
-// Picks the locale-appropriate field off a backend product object.
-// The API stores bilingual fields as `<field>_en` / `<field>_cn`.
-// Falls back to the English value so Chinese callers still see content
-// when a row is missing its `_cn` translation.
+/**
+ * 백엔드 상품 객체에서 언어별 필드를 골라 읽는 헬퍼.
+ *
+ * API 는 bilingual 필드를 `<field>_en` / `<field>_cn` 로 저장한다.
+ * cn 사용자라도 해당 행에 _cn 번역이 비어 있으면 영어로 fallback 해서
+ * 최소한 내용이 빈 칸이 되지 않도록 한다.
+ */
 function pickLocalized(obj, field, lang) {
   if (!obj) return ''
   const key = `${field}_${lang === 'cn' ? 'cn' : 'en'}`
   return obj[key] || obj[`${field}_en`] || obj[field] || ''
 }
 
-// Reads the product's base price regardless of which product type it is.
-// Backend schema uses `base_price` on hotels/tickets/packages/room_types.
+/**
+ * 상품/객실 객체에서 기준 가격을 꺼낸다.
+ * 백엔드 스키마는 hotels/tickets/packages/room_types 모두 `base_price` 를
+ * 정식 컬럼으로 쓰지만, 과거 응답 혼재를 위해 price / basePrice 도 fallback.
+ */
 function readBasePrice(obj) {
   if (!obj) return 0
   return Number(obj.base_price ?? obj.price ?? obj.basePrice ?? 0)
@@ -232,13 +265,27 @@ const typeIcons = {
   package: '\u{1F381}',
 }
 
+/**
+ * 예약 입력 페이지.
+ *
+ * 내부 state:
+ *   - product     : 현재 예약 대상 상품(호텔/티켓/패키지)
+ *   - submitting  : 제출 중(더블클릭 방지/버튼 비활성화)
+ *   - submitError : 서버가 돌려준 에러 메시지
+ *   - form        : 이름/이메일/전화/국적/특이사항 입력값
+ *
+ * 부작용:
+ *   - 마운트 시 상품 fetch
+ *   - 로그인 상태면 user 정보로 form prefill
+ *   - 제출 시 POST /bookings, 성공하면 confirmation 페이지로 navigate
+ */
 export default function BookingPage() {
   const { type, id } = useParams()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { t, i18n } = useTranslation()
-  // Normalize the active i18n locale so pickLocalized() can select the
-  // right `_en` / `_cn` column from bilingual backend records.
+  // 활성 i18n locale 을 'cn' | 'en' 두 값으로 정규화해 pickLocalized() 가
+  // 올바른 `_en` / `_cn` 컬럼을 고를 수 있게 한다.
   const lang = i18n.language && i18n.language.startsWith('zh') ? 'cn' : (i18n.language || 'en')
   const { user, isAuthenticated } = useAuth()
 
@@ -248,6 +295,8 @@ export default function BookingPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
 
+  // URL 쿼리에서 상세 페이지가 넘겨 준 예약 컨텍스트를 꺼낸다.
+  // 호텔: checkIn/checkOut/roomType, 티켓·패키지: date/quantity.
   const checkIn = searchParams.get('checkIn') || ''
   const checkOut = searchParams.get('checkOut') || ''
   const roomTypeId = searchParams.get('roomType') || ''
@@ -262,6 +311,8 @@ export default function BookingPage() {
     nationality: '',
   })
 
+  // 로그인된 사용자면 프로필 정보로 폼을 미리 채워 준다.
+  // 타이핑 중에 auth 정보가 덮어쓰지 않도록 빈 값일 때만 세팅.
   useEffect(() => {
     if (isAuthenticated && user) {
       setForm(f => ({
@@ -274,6 +325,9 @@ export default function BookingPage() {
     }
   }, [isAuthenticated, user])
 
+  // --------------------------------------------------------------------------
+  // 상품 fetch + 응답 정규화
+  // --------------------------------------------------------------------------
   useEffect(() => {
     const fetchProduct = async () => {
       setLoading(true)
@@ -285,10 +339,10 @@ export default function BookingPage() {
         else throw new Error('Invalid booking type')
 
         const data = await get(endpoint)
-        // Hotel detail returns `{ hotel, room_types }` — merge the
-        // room_types array onto the product so the summary/totalling code
-        // only has to look in one place. Tickets/packages return a single
-        // wrapped object.
+        // 호텔 상세는 `{ hotel, room_types }` 로 내려오므로 room_types 를
+        // hotel 객체 안으로 병합해 아래 요약/합계 계산 로직이 한 군데만
+        // 들여다보면 되게 한다. 티켓/패키지는 { ticket } / { package }
+        // 단일 wrapper 객체를 돌려준다.
         let resolved
         if (type === 'hotel') {
           resolved = data.hotel ? { ...data.hotel, room_types: data.room_types || [] } : null
@@ -310,9 +364,15 @@ export default function BookingPage() {
     fetchProduct()
   }, [type, id])
 
-  // Resolves the currently selected room_type object from the hotel's
-  // room_types array. Coerces both sides to string because URL params are
-  // always strings but backend ids are integers.
+  // --------------------------------------------------------------------------
+  // 파생 값 계산 헬퍼
+  // --------------------------------------------------------------------------
+
+  /**
+   * URL 의 roomTypeId 에 해당하는 room_type 객체를 호텔 내부 배열에서 찾는다.
+   * URL 파라미터는 항상 문자열이지만 백엔드 id 는 정수이므로 String()
+   * 으로 양쪽을 맞춘 뒤 비교한다.
+   */
   const getSelectedRoom = () => {
     if (!product) return null
     const roomTypes = product.room_types || []
@@ -322,6 +382,12 @@ export default function BookingPage() {
     return roomTypes[0] || null
   }
 
+  /**
+   * 총액 계산.
+   * - 호텔: 선택된 객실 단가 × 박수.
+   * - 티켓/패키지: 단가 × quantity.
+   * - 그 외: 단가 하나 그대로.
+   */
   const calculateTotal = () => {
     if (!product) return 0
 
@@ -330,6 +396,7 @@ export default function BookingPage() {
       const roomPrice = room ? readBasePrice(room) : readBasePrice(product)
 
       if (checkIn && checkOut) {
+        // 체크인/아웃 차이를 일수로 환산. Math.ceil 로 부분일도 1박 처리.
         const nights = Math.max(1, Math.ceil((new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24)))
         return roomPrice * nights
       }
@@ -343,6 +410,7 @@ export default function BookingPage() {
     return readBasePrice(product)
   }
 
+  /** 선택된 체크인/아웃 기반 박 수(최소 1). 요약 카드에서 표시용. */
   const getNights = () => {
     if (checkIn && checkOut) {
       return Math.max(1, Math.ceil((new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24)))
@@ -350,14 +418,27 @@ export default function BookingPage() {
     return 1
   }
 
-  // Returns the currently selected room type's localized name, or '' if
-  // the user hasn't picked a room.
+  /**
+   * 선택된 객실 타입의 현재 locale 이름.
+   * roomTypeId 가 없으면 빈 문자열(요약 카드에서 객실 줄을 숨기기 위함).
+   */
   const getRoomTypeName = () => {
     const room = roomTypeId ? getSelectedRoom() : null
     if (!room) return ''
     return pickLocalized(room, 'name', lang)
   }
 
+  // --------------------------------------------------------------------------
+  // 폼 제출 → POST /bookings
+  // --------------------------------------------------------------------------
+  /**
+   * 예약 폼 제출.
+   *
+   * 백엔드 계약(backend/src/routes/bookings.js POST /) 은 strict snake_case
+   * 이다. 과거에 camelCase 로 보냈다가 DB 작업 전에 400 이 떨어지던 버그를
+   * e504ce7 커밋에서 정합화했다. 이 payload 구성은 해당 라우트 핸들러와
+   * 1:1 로 맞춰야 한다.
+   */
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.name || !form.email || !form.phone) {
@@ -369,9 +450,7 @@ export default function BookingPage() {
     setSubmitError(null)
 
     try {
-      // Backend contract (backend/src/routes/bookings.js POST /) is strict
-      // snake_case — sending camelCase previously caused a 400 before any
-      // DB work ran. Keep this payload aligned with that route handler.
+      // 공통 필드. 모든 상품 유형에 필요하다.
       const bookingData = {
         product_type: type,
         product_id: Number(id),
@@ -381,6 +460,7 @@ export default function BookingPage() {
         special_requests: form.specialRequests || null,
       }
 
+      // 상품 유형별 추가 필드. 호텔은 체크인/아웃/객실, 티켓·패키지는 날짜/수량.
       if (type === 'hotel') {
         bookingData.check_in = checkIn
         bookingData.check_out = checkOut
@@ -394,13 +474,13 @@ export default function BookingPage() {
       }
 
       const result = await post('/bookings', bookingData)
-      // sql.js returns integer ids under `id`; there is no `_id`.
+      // sql.js 는 정수 id 를 `id` 키로만 돌려준다. '_id' 는 없다.
+      // 응답 shape 차이에 대비해 result.booking?.id 와 result.id 둘 다 본다.
       const bookingId = result.booking?.id || result.id
       if (!bookingId) throw new Error('Booking created but response was missing id')
-      // Forward the guest email so the confirmation page can re-fetch the
-      // booking even when the user is not logged in — the backend's
-      // ownership check accepts `guest_email` as an authorization signal
-      // for guest bookings.
+      // 비로그인 고객도 예약 직후 confirmation 페이지에서 내역을 다시 조회해야
+      // 한다. 백엔드의 ownership 체크는 비로그인 상태에서 guest_email 쿼리를
+      // 소유 증명으로 받아 주므로, email 을 URL 에 싣고 이동한다.
       const emailParam = encodeURIComponent(form.email)
       navigate(`/booking/confirmation/${bookingId}?email=${emailParam}`)
     } catch (err) {

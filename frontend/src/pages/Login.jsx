@@ -1,3 +1,22 @@
+// ============================================================================
+// Login — 로그인 페이지 (/login)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 이메일+비밀번호 폼으로 AuthContext.login 호출 후 성공 시 홈으로 이동.
+//   - 아래에 Google Sign-In 버튼을 배치해 Google credential 을
+//     AuthContext.loginWithGoogle 로 교환한다.
+//   - 하단에 비회원용 "주문 조회"(/order-lookup) 링크 제공.
+//
+// 렌더 위치: /login. lazy-loaded.
+//
+// 주의:
+//   - GoogleSignInButton 에 넘기는 콜백은 반드시 useCallback 으로 감싼다.
+//     버튼 내부 useEffect 가 credentail 콜백 참조가 바뀔 때마다 재렌더되면
+//     GIS 버튼이 깜빡이며 클릭 상태가 리셋된다(c06b286 설계).
+//   - googleLoading 과 loading 은 분리해서 둔다. Google 요청 중에도 비밀번호
+//     폼은 계속 쓸 수 있도록 의도적으로 독립 관리.
+// ============================================================================
+
 import React, { useState, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -121,6 +140,17 @@ const styles = {
   },
 }
 
+/**
+ * 로그인 페이지.
+ *
+ * 내부 state:
+ *   - email/password : 폼 입력
+ *   - loading        : password flow 전송 중
+ *   - googleLoading  : google flow 전송 중(두 flow 가 서로 독립)
+ *   - error          : 공유 에러 배너 메시지
+ *
+ * 부작용: login() 또는 loginWithGoogle() 성공 시 navigate('/')
+ */
 export default function Login() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -129,10 +159,11 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
-  // Separate flag so the Google round trip can disable the Google
-  // button without also blocking the password form.
+  // Google 왕복 중에도 Google 버튼만 disable 하고 비밀번호 폼은 자유로워야
+  // 하므로 플래그를 분리한다.
   const [googleLoading, setGoogleLoading] = useState(false)
 
+  // 비밀번호 기반 로그인 제출. 성공 시 홈으로 이동.
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError(null)
@@ -148,9 +179,11 @@ export default function Login() {
     }
   }
 
-  // Memoized so GoogleSignInButton's effect doesn't re-run on every
-  // parent render and re-draw the button, which would reset its
-  // internal state.
+  /**
+   * GoogleSignInButton 이 GIS 팝업을 통해 credential 을 얻으면 호출된다.
+   * useCallback 으로 감싸는 게 핵심: 참조가 안정되어야 버튼 내부 useEffect
+   * 가 재실행되면서 버튼이 깜빡이고 클릭 상태가 리셋되는 이슈를 피할 수 있다.
+   */
   const handleGoogleCredential = useCallback(async (credential) => {
     setError(null)
     setGoogleLoading(true)
@@ -164,6 +197,7 @@ export default function Login() {
     }
   }, [loginWithGoogle, navigate, t])
 
+  // GIS 스크립트 로딩 실패 등의 에러를 공용 에러 배너로 올려 준다.
   const handleGoogleError = useCallback((err) => {
     setError((err && err.message) || t('common.error'))
   }, [t])
@@ -220,10 +254,9 @@ export default function Login() {
           </button>
         </form>
 
-        {/* Social sign-in. Rendered below the password form so the
-            password flow stays the primary action but Google is one
-            click away. The button component hides itself with a
-            friendly notice when VITE_GOOGLE_CLIENT_ID isn't set. */}
+        {/* 소셜 로그인. 비밀번호 플로우를 주 액션으로 두고, 구글은 바로 아래에
+            보조로 배치한다. VITE_GOOGLE_CLIENT_ID 미설정 시 버튼 컴포넌트가
+            스스로 "설정되지 않음" 안내 박스로 대체된다. */}
         <div style={styles.divider}>
           <span style={styles.dividerLine} />
           <span style={styles.dividerText}>{t('auth.orDivider')}</span>

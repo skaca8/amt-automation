@@ -1,3 +1,22 @@
+// ============================================================================
+// Profile — 내 프로필 페이지 (/profile)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - AuthContext 의 user 를 사이드바에 보여 주고(이름/이메일/이니셜 아바타)
+//     총 예약 건수 통계를 /bookings/my 응답 길이로 계산해 표시한다.
+//   - 이름/전화/국적 수정(AuthContext.updateProfile → PUT /auth/me).
+//     이메일은 읽기 전용.
+//   - 언어 선호(en/cn) 변경 → i18n.changeLanguage + localStorage 영속화.
+//   - 최근 예약 3건을 요약 리스트로 보여 주고 클릭 시 상세 이동.
+//
+// 렌더 위치: /profile. lazy-loaded. 로그인 필수(비로그인은 로그인 유도 박스).
+//
+// 주의:
+//   - /bookings/my 응답의 예약 행은 snake_case(booking_number, created_at,
+//     status, total_price).
+//   - updateProfile 엔드포인트는 PUT /auth/me 이다(과거 /auth/profile 404 버그 해결).
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -213,6 +232,23 @@ const styles = {
   },
 }
 
+/**
+ * 프로필 페이지.
+ *
+ * 내부 state:
+ *   - editing        : 인라인 편집 모드 on/off
+ *   - form           : 편집 중 스냅샷(이름/전화/국적)
+ *   - saving         : PUT 진행 중
+ *   - success/error  : 저장 결과 배너
+ *   - recentBookings : 최근 예약 3건(요약용)
+ *   - bookingCount   : 통계 카드 숫자
+ *
+ * 부작용:
+ *   - user 가 채워지면 form 동기화
+ *   - 로그인 상태에서 /bookings/my GET 으로 리스트/카운트 로드
+ *   - "저장" 시 AuthContext.updateProfile 호출
+ *   - 언어 select 변경 시 i18n.changeLanguage + localStorage 저장
+ */
 export default function Profile() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
@@ -230,6 +266,7 @@ export default function Profile() {
   const [recentBookings, setRecentBookings] = useState([])
   const [bookingCount, setBookingCount] = useState(0)
 
+  // user 객체가 갱신되면(로그인 직후, 저장 직후) 폼 스냅샷을 맞춘다.
   useEffect(() => {
     if (user) {
       setForm({
@@ -240,6 +277,7 @@ export default function Profile() {
     }
   }, [user])
 
+  // 로그인 사용자의 예약 목록을 한 번 가져와 통계/최근 3건을 계산.
   useEffect(() => {
     if (!isAuthenticated) return
     const fetchBookings = async () => {
@@ -259,6 +297,7 @@ export default function Profile() {
     setForm(f => ({ ...f, [field]: e.target.value }))
   }
 
+  // 저장 버튼 핸들러. PUT /auth/me 성공 시 3초간 성공 배너를 띄운다.
   const handleSave = async () => {
     setSaving(true)
     setError(null)
@@ -275,6 +314,7 @@ export default function Profile() {
     }
   }
 
+  // 언어 선택 select 핸들러. Header 의 토글과 동일한 정책으로 동작.
   const handleLangChange = (e) => {
     const lang = e.target.value
     i18n.changeLanguage(lang)
@@ -459,8 +499,9 @@ export default function Profile() {
             {recentBookings.length > 0 ? (
               <div style={styles.bookingSummary}>
                 {recentBookings.map(b => {
-                  // `/bookings/my` returns raw booking rows — all keys
-                  // are snake_case here.
+                  // /bookings/my 는 raw booking row 를 그대로 돌려 주므로
+                  // 여기서 읽는 모든 키(booking_number, total_price,
+                  // created_at, status)는 snake_case 다.
                   const bid = b.id
                   return (
                     <div

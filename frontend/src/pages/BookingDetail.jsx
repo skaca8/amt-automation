@@ -1,11 +1,34 @@
+// ============================================================================
+// BookingDetail — 내 예약 상세 페이지 (/my-bookings/:id)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - /bookings/:id 에서 단건 예약을 다시 조회해 상품/객실/게스트 정보/상태
+//     타임라인/바우처/가격 내역을 카드 형태로 렌더한다.
+//   - 상태가 pending 또는 confirmed 인 예약은 "취소" 버튼을 활성화하고,
+//     PUT /bookings/:id/cancel 로 취소 요청을 보낸다. 성공 시 UI 상태를
+//     'cancelled' 로 업데이트한다.
+//
+// 렌더 위치: /my-bookings/:id. MyBookings 리스트에서 진입. lazy-loaded.
+//
+// 주의:
+//   - 이 페이지는 로그인 사용자가 진입하는 라우트라서 api.js 의 Authorization
+//     헤더만으로 ownership 이 검증된다. guest_email 쿼리 forwarding 은 필요 없음.
+//   - 백엔드는 PUT /bookings/:id/cancel 을 쓴다. DELETE /bookings/:id 는 없다.
+//   - booking 객체의 필드는 모두 snake_case (check_in, check_out, visit_date,
+//     guest_name, guest_email, guest_phone, special_requests, total_price,
+//     product_type, booking_number) — sql.js row 직결.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { get, put } from '../utils/api'
 
-// Picks the locale-appropriate bilingual field off a backend product row.
-// Mirrors the helper in BookingPage/BookingConfirmation; kept inline
-// because the React app has no shared utility module yet.
+/**
+ * 상품 객체에서 현재 언어 필드를 꺼내는 헬퍼.
+ * BookingPage/BookingConfirmation 과 동일 구현을 페이지마다 복제한다 —
+ * 아직 공용 util 모듈이 없어서 그렇게 두었다.
+ */
 function pickLocalized(obj, field, lang) {
   if (!obj) return ''
   const key = `${field}_${lang === 'cn' ? 'cn' : 'en'}`
@@ -220,6 +243,17 @@ const statusColors = {
   refunded: { bg: '#eceff1', text: '#546e7a' },
 }
 
+/**
+ * 내 예약 상세.
+ *
+ * 내부 state:
+ *   - data       : { booking, product, room_type, voucher, ... } 응답 전체
+ *   - cancelling : 취소 요청 중 버튼 비활성화 용
+ *
+ * 부작용:
+ *   - 마운트 시 /bookings/:id GET
+ *   - "취소" 클릭 시 PUT /bookings/:id/cancel
+ */
 export default function BookingDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -234,9 +268,9 @@ export default function BookingDetail() {
     const fetchBooking = async () => {
       setLoading(true)
       try {
-        // This page is reached from /my-bookings, so the user is logged
-        // in and the Authorization header from api.js will satisfy the
-        // backend's ownership check.
+        // 이 페이지는 /my-bookings 에서 진입하므로 사용자는 반드시 로그인
+        // 상태다. api.js 가 붙여 주는 Authorization 헤더만으로 백엔드의
+        // ownership 체크를 통과한다 — guest_email 쿼리는 불필요.
         const res = await get(`/bookings/${id}`)
         setData(res || null)
       } catch (err) {
@@ -248,11 +282,17 @@ export default function BookingDetail() {
     fetchBooking()
   }, [id])
 
+  /**
+   * 예약 취소. window.confirm 으로 사용자 확인 후 PUT /bookings/:id/cancel.
+   * 성공하면 화면 상태만 'cancelled' 로 바꿔 자연스럽게 뱃지/타임라인/버튼을
+   * 갱신한다. (리스트 재조회는 /my-bookings 로 돌아갈 때 발생.)
+   */
   const handleCancel = async () => {
     if (!window.confirm(t('myBookings.confirmCancel'))) return
     setCancelling(true)
     try {
-      // Backend exposes PUT /bookings/:id/cancel, not DELETE /bookings/:id.
+      // 백엔드는 PUT /bookings/:id/cancel 을 노출한다. DELETE /bookings/:id
+      // 는 존재하지 않으므로 PUT 으로 명시적 취소 엔드포인트를 호출해야 한다.
       const res = await put(`/bookings/${id}/cancel`, {})
       setData(prev => ({
         ...(prev || {}),
@@ -287,11 +327,13 @@ export default function BookingDetail() {
   }
 
   const status = booking.status || 'pending'
+  // pending / confirmed 상태만 사용자가 직접 취소할 수 있다.
+  // cancelled / refunded 는 이미 종결 상태라 버튼을 감춘다.
   const canCancel = status === 'pending' || status === 'confirmed'
   const bkn = booking.booking_number || id
   const voucherCode = voucher?.code || ''
-  // Prefer the bilingual product name returned by the backend; fall back
-  // to the booking's product_type label if the product row is missing.
+  // 이름은 bilingual 필드를 우선 시도하고, 상품 row 자체가 비어 있으면
+  // product_type(원시 enum) 이라도 표시해 완전히 빈 화면을 피한다.
   const productName = pickLocalized(product, 'name', lang) || booking.product_type || 'Booking'
   const totalPrice = Number(booking.total_price || 0)
   const sc = statusColors[status] || statusColors.pending
