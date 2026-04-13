@@ -89,6 +89,26 @@ const styles = {
     color: '#fff',
     backdropFilter: 'blur(4px)',
   },
+  // 🔒 "Invite only" 배지 스타일. is_restricted=1 상품에 대해 노출.
+  // 위치는 좌측 하단이라 category/featured/rating 배지와 겹치지 않는다.
+  // 색은 보라 계열 — "잠겨 있음 / 특별" 느낌.
+  restrictedBadge: {
+    position: 'absolute',
+    bottom: '12px',
+    left: '12px',
+    padding: '4px 10px',
+    borderRadius: '20px',
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    background: 'rgba(124, 58, 237, 0.95)',
+    color: '#fff',
+    backdropFilter: 'blur(4px)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+  },
   ratingBadge: {
     position: 'absolute',
     top: '12px',
@@ -322,6 +342,14 @@ export default function ProductCard({ type = 'hotel', data, onClick }) {
         {type === 'hotel' && rating && (
           <span style={styles.ratingBadge}>
             &#9733; {rating}
+          </span>
+        )}
+        {/* is_restricted=1 상품에 "Invite only" 배지 노출.
+            배지만 달고 리스트에는 그대로 노출 — 예약 단계에서 access code
+            게이트가 실제 구매를 차단한다. */}
+        {data.is_restricted === 1 && (
+          <span style={styles.restrictedBadge}>
+            {'\u{1F512}'} {t('booking.restrictedBadge')}
           </span>
         )}
       </div>

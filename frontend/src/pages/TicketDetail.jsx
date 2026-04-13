@@ -338,6 +338,27 @@ export default function TicketDetail() {
           {ticket.category && (
             <span style={styles.categoryBadge}>{ticket.category}</span>
           )}
+          {/* is_restricted=1 티켓은 상단에 inline "Invite only" 배지 노출.
+              예약 페이지에서 access_code 입력 필드가 나타난다. */}
+          {ticket.is_restricted === 1 && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '5px 12px',
+              borderRadius: 20,
+              background: 'rgba(124, 58, 237, 0.1)',
+              border: '1px solid rgba(124, 58, 237, 0.4)',
+              color: '#6d28d9',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              marginLeft: 8,
+            }}>
+              {'\u{1F512}'} {t('booking.restrictedBadge')}
+            </div>
+          )}
 
           <h1 style={styles.name}>{ticketName}</h1>
 

@@ -436,6 +436,27 @@ export default function HotelDetail() {
       <div style={styles.infoSection} className="hotel-info-grid">
         <div style={styles.mainInfo}>
           <h1 style={styles.hotelName}>{hotelName}</h1>
+          {/* is_restricted=1 호텔에는 상단에 inline 배지 노출. 예약 페이지
+              로 가면 access_code 입력 칸이 나타난다. */}
+          {hotel.is_restricted === 1 && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '5px 12px',
+              borderRadius: 20,
+              background: 'rgba(124, 58, 237, 0.1)',
+              border: '1px solid rgba(124, 58, 237, 0.4)',
+              color: '#6d28d9',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              marginBottom: 12,
+            }}>
+              {'\u{1F512}'} {t('booking.restrictedBadge')}
+            </div>
+          )}
           <div style={styles.ratingRow}>
             {hotel.rating && (
               <span style={styles.ratingBadge}>&#9733; {hotel.rating}</span>

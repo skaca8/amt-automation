@@ -308,6 +308,27 @@ export default function PackageDetail() {
 
           <h1 style={styles.name}>{pkgName}</h1>
 
+          {/* is_restricted=1 패키지는 상단에 inline "Invite only" 배지 노출. */}
+          {pkg.is_restricted === 1 && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '5px 12px',
+              borderRadius: 20,
+              background: 'rgba(124, 58, 237, 0.1)',
+              border: '1px solid rgba(124, 58, 237, 0.4)',
+              color: '#6d28d9',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              marginBottom: 12,
+            }}>
+              {'\u{1F512}'} {t('booking.restrictedBadge')}
+            </div>
+          )}
+
           <div style={styles.meta}>
             {pkg.duration && (
               <span style={styles.metaItem}>&#128197; {t('package.duration')}: {pkg.duration}</span>
