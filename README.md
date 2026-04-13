@@ -659,6 +659,86 @@ erDiagram
 
 ---
 
+### 6.6 관리자 API `/api/admin/**`
+
+모든 관리자 엔드포인트는 각 라우터 상단에서 `router.use(authenticate, requireAdmin)` 로 **`role='admin'` 만 통과** 시킵니다. 401/403 은 공통 규약을 따릅니다.
+
+#### 6.6.1 대시보드 `/api/admin/dashboard`
+
+| Method | Path | 응답 |
+|---|---|---|
+| `GET` | `/overview` | `200 { total_bookings, total_revenue, total_users, total_hotels, total_tickets, total_packages, pending_bookings, confirmed_bookings, cancelled_bookings, today_bookings, today_revenue }` |
+| `GET` | `/revenue` | `200 { timeseries: [{ date, revenue, count }] }` (최근 30일 일별 매출) |
+
+#### 6.6.2 예약 관리 `/api/admin/bookings`
+
+| Method | Path | Body / Query | 응답 · 동작 |
+|---|---|---|---|
+| `GET` | `/stats` | — | `200 { total_bookings, total_revenue, today_bookings, status_breakdown, payment_breakdown, product_breakdown }` |
+| `GET` | `/export` | `status?`, `payment_status?`, `product_type?`, `from_date?`, `to_date?` | `200 text/csv` (Content-Disposition attachment) |
+| `GET` | `/` | 위와 동일 + `search?`, `page?`, `limit?` | `200 { bookings, pagination }` |
+| `GET` | `/:id` | — | `200 { booking, voucher, payment, product, room_type, user }` (관리자는 소유권 체크 없음) |
+| `PUT` | `/:id/status` | `{ status }` ∈ `pending\|confirmed\|cancelled\|refunded\|completed` | `cancelled`/`refunded` 로 전이 시 **`restoreBookingInventory` 실행 + 바우처 `cancelled`** — 모두 transaction. 이미 released 상태면 double-decrement 방지 위해 복원 skip. `400` 허용 외 status |
+| `PUT` | `/:id/payment` | `{ payment_status, payment_id? }` | `bookings` + `payments` 두 테이블 동시 업데이트 (transaction). `payment_status='paid'` + 원래 `pending` 이면 `bookings.status='confirmed'` 로 자동 승격 |
+| `POST` | `/:id/refund` | `{ refund_amount? }` | 이미 released 상태가 아니면 `restoreBookingInventory`, `payments` 환불 기록, `bookings` `refunded`, 바우처 `cancelled` — 전부 transaction. `400` 금액 오류 |
+
+#### 6.6.3 상품 관리 `/api/admin/products`
+
+상품 타입별로 CRUD 엔드포인트가 있습니다. 세 리소스 모두 동일한 구조(`GET /`, `GET /:id`, `POST /`, `PUT /:id`, `DELETE /:id`).
+
+| 리소스 | Path prefix | 비고 |
+|---|---|---|
+| 호텔 | `/api/admin/products/hotels` | + 서브리소스: `/api/admin/products/hotels/:hotelId/rooms` (객실 타입 CRUD) |
+| 티켓 | `/api/admin/products/tickets` | `is_featured`, `sort_order` 지원 |
+| 패키지 | `/api/admin/products/packages` | + `/api/admin/products/packages/:packageId/items` (번들 아이템) |
+| 재고 | `/api/admin/products/inventory` | 상품별 날짜 구간 일괄 생성 · 업데이트 |
+| 추천 토글 | `PUT /api/admin/products/featured` | `{ product_type, product_id, is_featured?, sort_order? }` — `product_type` 은 `PRODUCT_TABLES` **allow-list** (`hotel`/`ticket`/`package`) 밖이면 `400` |
+
+> **SQL 인젝션 방지**: `/featured` 엔드포인트는 과거에 알 수 없는 `product_type` 이 조용히 `packages` 테이블로 빠지는 버그가 있었습니다. 현재는 `PRODUCT_TABLES` 맵의 키가 아니면 즉시 `400` 으로 거절되고, 테이블 이름은 맵에서만 가져오므로 동적 SQL 에 사용자 입력이 절대 들어가지 않습니다.
+
+#### 6.6.4 사용자 관리 `/api/admin/users`
+
+| Method | Path | 동작 |
+|---|---|---|
+| `GET` | `/` | 페이지네이션 + 역할/검색 필터 |
+| `GET` | `/:id` | 사용자 정보 + 예약 히스토리 |
+| `PUT` | `/:id` | 이름/연락처/권한(`role`) 업데이트 |
+| `DELETE` | `/:id` | 사용자 삭제 (예약의 `user_id` 는 FK ON DELETE SET NULL 로 NULL 이 됨) |
+
+#### 6.6.5 결제 관리 `/api/admin/payments`
+
+| Method | Path | Query / Body | 응답 |
+|---|---|---|---|
+| `GET` | `/stats` | — | `200 { total_payments, total_amount, total_refunds, pending_payments, status_breakdown, method_breakdown, today }` |
+| `GET` | `/` | `status?`, `method?`, `from_date?`, `to_date?`, `page?`, `limit?` | `200 { payments, pagination }` (bookings 와 LEFT JOIN 된 결과) |
+| `GET` | `/:id` | — | `200 { payment }` (+ 연결된 예약 요약 필드) |
+| `PUT` | `/:id/status` | `{ status, stripe_payment_id? }` | 결제 + 예약 `payment_status` 동시 갱신, `paid` 면 예약 `confirmed` 로 승격 |
+
+> 과거 admin PaymentManagement 페이지가 `start_date`/`end_date` 파라미터명을 보내 날짜 필터가 조용히 무시되던 버그가 있었습니다. 현재는 프런트·백엔드 모두 `from_date`/`to_date` 로 통일됐습니다.
+
+#### 6.6.6 프로모션 `/api/admin/promotions`
+
+| Method | Path | 동작 |
+|---|---|---|
+| `GET` | `/` | 전체 프로모션 + `blackout_dates` JSON 파싱 |
+| `GET` | `/:id` | 단건 |
+| `POST` | `/` | 생성 |
+| `PUT` | `/:id` | 수정 |
+| `DELETE` | `/:id` | 삭제 |
+
+#### 6.6.7 이미지 업로드 `/api/admin/upload`
+
+| Method | Path | Body | 응답 |
+|---|---|---|---|
+| `POST` | `/` | `multipart/form-data` · field `image` | `200 { url: "/uploads/<filename>", filename, size }` |
+| `POST` | `/multiple` | `multipart/form-data` · field `images` (최대 10개) | `200 { files: [...] }` |
+
+- multer 디스크 스토리지. 파일명은 `<timestamp>-<random>.<ext>`.
+- **제한**: 단일 파일 10MB, MIME 화이트리스트 `jpeg | jpg | png | gif | webp`.
+- 저장 경로: `backend/uploads/` (git ignore), 정적 서빙은 `GET /uploads/<filename>`.
+
+---
+
 ## 7. 데이터 흐름도 (DFD)
 
 <!-- TODO:SECTION-7 -->
