@@ -1,3 +1,21 @@
+// ============================================================================
+// PackageDetail — 패키지 상세 페이지 (/packages/:id)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - /packages/:id 에서 패키지 1건을 받아 히어로 이미지/이름/설명/기간 정보를
+//     렌더하고, 포함 사항(includes) 체크 리스트를 보여준다.
+//   - 사이드바에서 시작 날짜 + 인원 수를 고르면 단가×인원 Total 을 계산해
+//     실시간 반영한다.
+//   - "Book Now" → /booking/package/:id?date=..&quantity=.. navigate.
+//
+// 렌더 위치: /packages/:id 라우트. lazy-loaded.
+//
+// 주의:
+//   - TicketDetail 과 거의 쌍둥이 구조(수량 UI, 가격 계산, navigate).
+//   - includes 필드는 string 배열이거나 {name, description} 객체 배열로
+//     올 수 있어 둘 다 렌더 가능하게 분기한다.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -166,6 +184,7 @@ const styles = {
   },
 }
 
+/** images 를 배열로 정규화(배열/JSON 문자열/null). */
 function parseImages(images) {
   if (!images) return []
   if (Array.isArray(images)) return images
@@ -175,6 +194,17 @@ function parseImages(images) {
   return []
 }
 
+/**
+ * 패키지 상세 페이지.
+ *
+ * 내부 state:
+ *   - pkg       : 패키지 본체
+ *   - startDate : 시작일 ('YYYY-MM-DD')
+ *   - quantity  : 인원 수 (1~20)
+ *   - heroIdx   : 히어로 썸네일 인덱스
+ *
+ * 부작용: 마운트 시 /packages/:id GET, "Book Now" 시 navigate.
+ */
 export default function PackageDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -278,6 +308,27 @@ export default function PackageDetail() {
 
           <h1 style={styles.name}>{pkgName}</h1>
 
+          {/* is_restricted=1 패키지는 상단에 inline "Invite only" 배지 노출. */}
+          {pkg.is_restricted === 1 && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '5px 12px',
+              borderRadius: 20,
+              background: 'rgba(124, 58, 237, 0.1)',
+              border: '1px solid rgba(124, 58, 237, 0.4)',
+              color: '#6d28d9',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              marginBottom: 12,
+            }}>
+              {'\u{1F512}'} {t('booking.restrictedBadge')}
+            </div>
+          )}
+
           <div style={styles.meta}>
             {pkg.duration && (
               <span style={styles.metaItem}>&#128197; {t('package.duration')}: {pkg.duration}</span>
@@ -358,7 +409,8 @@ export default function PackageDetail() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem', color: '#475569' }}>
               <span>Unit Price</span>
-              <span>{'\u20A9'}{price.toLocaleString()} / person</span>
+              {/* 통화 기호는 i18n 키로 분리 (common.currencySymbol). */}
+              <span>{t('common.currencySymbol')}{price.toLocaleString()} / person</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem', color: '#475569' }}>
               <span>Quantity</span>
@@ -367,7 +419,7 @@ export default function PackageDetail() {
             <div style={{ borderTop: '2px solid #e2e8f0', paddingTop: 12, marginTop: 8,
               display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem', fontWeight: 700, color: '#1e293b' }}>
               <span>Total</span>
-              <span style={{ color: '#1a73e8' }}>{'\u20A9'}{(price * quantity).toLocaleString()}</span>
+              <span style={{ color: '#1a73e8' }}>{t('common.currencySymbol')}{(price * quantity).toLocaleString()}</span>
             </div>
           </div>
 

@@ -1,7 +1,39 @@
+// ============================================================================
+// BookingDetail — 내 예약 상세 페이지 (/my-bookings/:id)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - /bookings/:id 에서 단건 예약을 다시 조회해 상품/객실/게스트 정보/상태
+//     타임라인/바우처/가격 내역을 카드 형태로 렌더한다.
+//   - 상태가 pending 또는 confirmed 인 예약은 "취소" 버튼을 활성화하고,
+//     PUT /bookings/:id/cancel 로 취소 요청을 보낸다. 성공 시 UI 상태를
+//     'cancelled' 로 업데이트한다.
+//
+// 렌더 위치: /my-bookings/:id. MyBookings 리스트에서 진입. lazy-loaded.
+//
+// 주의:
+//   - 이 페이지는 로그인 사용자가 진입하는 라우트라서 api.js 의 Authorization
+//     헤더만으로 ownership 이 검증된다. guest_email 쿼리 forwarding 은 필요 없음.
+//   - 백엔드는 PUT /bookings/:id/cancel 을 쓴다. DELETE /bookings/:id 는 없다.
+//   - booking 객체의 필드는 모두 snake_case (check_in, check_out, visit_date,
+//     guest_name, guest_email, guest_phone, special_requests, total_price,
+//     product_type, booking_number) — sql.js row 직결.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { get, del } from '../utils/api'
+import { get, put } from '../utils/api'
+
+/**
+ * 상품 객체에서 현재 언어 필드를 꺼내는 헬퍼.
+ * BookingPage/BookingConfirmation 과 동일 구현을 페이지마다 복제한다 —
+ * 아직 공용 util 모듈이 없어서 그렇게 두었다.
+ */
+function pickLocalized(obj, field, lang) {
+  if (!obj) return ''
+  const key = `${field}_${lang === 'cn' ? 'cn' : 'en'}`
+  return obj[key] || obj[`${field}_en`] || obj[field] || ''
+}
 
 const styles = {
   page: {
@@ -211,11 +243,23 @@ const statusColors = {
   refunded: { bg: '#eceff1', text: '#546e7a' },
 }
 
+/**
+ * 내 예약 상세.
+ *
+ * 내부 state:
+ *   - data       : { booking, product, room_type, voucher, ... } 응답 전체
+ *   - cancelling : 취소 요청 중 버튼 비활성화 용
+ *
+ * 부작용:
+ *   - 마운트 시 /bookings/:id GET
+ *   - "취소" 클릭 시 PUT /bookings/:id/cancel
+ */
 export default function BookingDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { t } = useTranslation()
-  const [booking, setBooking] = useState(null)
+  const { t, i18n } = useTranslation()
+  const lang = i18n.language && i18n.language.startsWith('zh') ? 'cn' : (i18n.language || 'en')
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [cancelling, setCancelling] = useState(false)
@@ -224,8 +268,11 @@ export default function BookingDetail() {
     const fetchBooking = async () => {
       setLoading(true)
       try {
-        const data = await get(`/bookings/${id}`)
-        setBooking(data.booking || data)
+        // 이 페이지는 /my-bookings 에서 진입하므로 사용자는 반드시 로그인
+        // 상태다. api.js 가 붙여 주는 Authorization 헤더만으로 백엔드의
+        // ownership 체크를 통과한다 — guest_email 쿼리는 불필요.
+        const res = await get(`/bookings/${id}`)
+        setData(res || null)
       } catch (err) {
         setError(err.message)
       } finally {
@@ -235,14 +282,24 @@ export default function BookingDetail() {
     fetchBooking()
   }, [id])
 
+  /**
+   * 예약 취소. window.confirm 으로 사용자 확인 후 PUT /bookings/:id/cancel.
+   * 성공하면 화면 상태만 'cancelled' 로 바꿔 자연스럽게 뱃지/타임라인/버튼을
+   * 갱신한다. (리스트 재조회는 /my-bookings 로 돌아갈 때 발생.)
+   */
   const handleCancel = async () => {
     if (!window.confirm(t('myBookings.confirmCancel'))) return
     setCancelling(true)
     try {
-      await del(`/bookings/${id}`)
-      setBooking(prev => ({ ...prev, status: 'cancelled' }))
+      // 백엔드는 PUT /bookings/:id/cancel 을 노출한다. DELETE /bookings/:id
+      // 는 존재하지 않으므로 PUT 으로 명시적 취소 엔드포인트를 호출해야 한다.
+      const res = await put(`/bookings/${id}/cancel`, {})
+      setData(prev => ({
+        ...(prev || {}),
+        booking: { ...(prev?.booking || {}), ...(res?.booking || {}), status: 'cancelled' }
+      }))
     } catch (err) {
-      alert(err.message || 'Failed to cancel')
+      alert(err.message || t('common.error'))
     } finally {
       setCancelling(false)
     }
@@ -252,12 +309,17 @@ export default function BookingDetail() {
     return <div style={styles.page}><div className="loading-container"><div className="spinner" /><span className="loading-text">{t('common.loading')}</span></div></div>
   }
 
+  const booking = data?.booking || null
+  const product = data?.product || null
+  const roomType = data?.room_type || null
+  const voucher = data?.voucher || null
+
   if (error || !booking) {
     return (
       <div style={styles.page}>
         <div className="error-container">
           <div className="error-icon">&#9888;</div>
-          <p className="error-message">{error || 'Booking not found'}</p>
+          <p className="error-message">{error || t('common.error')}</p>
           <button className="btn btn-primary" onClick={() => navigate('/my-bookings')}>{t('common.back')}</button>
         </div>
       </div>
@@ -265,11 +327,15 @@ export default function BookingDetail() {
   }
 
   const status = booking.status || 'pending'
+  // pending / confirmed 상태만 사용자가 직접 취소할 수 있다.
+  // cancelled / refunded 는 이미 종결 상태라 버튼을 감춘다.
   const canCancel = status === 'pending' || status === 'confirmed'
-  const bkn = booking.bookingNumber || booking.confirmationNumber || id?.slice(-8)
-  const voucherCode = booking.voucherCode || booking.voucher?.code || ''
-  const productName = booking.productName || booking.product?.name || booking.hotel?.name || booking.ticket?.name || booking.package?.name || 'Booking'
-  const totalPrice = booking.totalPrice || booking.total || 0
+  const bkn = booking.booking_number || id
+  const voucherCode = voucher?.code || ''
+  // 이름은 bilingual 필드를 우선 시도하고, 상품 row 자체가 비어 있으면
+  // product_type(원시 enum) 이라도 표시해 완전히 빈 화면을 피한다.
+  const productName = pickLocalized(product, 'name', lang) || booking.product_type || 'Booking'
+  const totalPrice = Number(booking.total_price || 0)
   const sc = statusColors[status] || statusColors.pending
 
   const timelineSteps = [
@@ -310,41 +376,54 @@ export default function BookingDetail() {
         </div>
 
         <div style={styles.cardBody}>
-          {/* Product Info */}
+          {/* Product Info — reads snake_case fields straight from the
+              bookings row and optional joined product/room_type rows. */}
           <h3 style={styles.sectionTitle}>{t('booking.product')}</h3>
           <div style={styles.infoGrid} className="detail-info-grid">
             <div style={styles.infoItem}>
               <div style={styles.infoLabel}>{t('booking.product')}</div>
               <div style={styles.infoValue}>{productName}</div>
             </div>
-            {booking.type && (
+            {booking.product_type && (
               <div style={styles.infoItem}>
-                <div style={styles.infoLabel}>Type</div>
-                <div style={styles.infoValue}>{booking.type}</div>
+                <div style={styles.infoLabel}>{t('common.type') || 'Type'}</div>
+                <div style={styles.infoValue}>{booking.product_type}</div>
               </div>
             )}
-            {booking.checkIn && (
+            {roomType && (
+              <div style={styles.infoItem}>
+                <div style={styles.infoLabel}>{t('hotel.roomType')}</div>
+                <div style={styles.infoValue}>{pickLocalized(roomType, 'name', lang)}</div>
+              </div>
+            )}
+            {booking.check_in && (
               <div style={styles.infoItem}>
                 <div style={styles.infoLabel}>{t('hotel.checkIn')}</div>
-                <div style={styles.infoValue}>{new Date(booking.checkIn).toLocaleDateString()}</div>
+                <div style={styles.infoValue}>{new Date(booking.check_in).toLocaleDateString()}</div>
               </div>
             )}
-            {booking.checkOut && (
+            {booking.check_out && (
               <div style={styles.infoItem}>
                 <div style={styles.infoLabel}>{t('hotel.checkOut')}</div>
-                <div style={styles.infoValue}>{new Date(booking.checkOut).toLocaleDateString()}</div>
+                <div style={styles.infoValue}>{new Date(booking.check_out).toLocaleDateString()}</div>
               </div>
             )}
-            {booking.visitDate && (
+            {booking.visit_date && (
               <div style={styles.infoItem}>
                 <div style={styles.infoLabel}>{t('ticket.visitDate')}</div>
-                <div style={styles.infoValue}>{new Date(booking.visitDate).toLocaleDateString()}</div>
+                <div style={styles.infoValue}>{new Date(booking.visit_date).toLocaleDateString()}</div>
               </div>
             )}
             {booking.quantity && (
               <div style={styles.infoItem}>
                 <div style={styles.infoLabel}>{t('ticket.quantity')}</div>
                 <div style={styles.infoValue}>{booking.quantity}</div>
+              </div>
+            )}
+            {booking.nights && booking.product_type === 'hotel' && (
+              <div style={styles.infoItem}>
+                <div style={styles.infoLabel}>{t('booking.nights')}</div>
+                <div style={styles.infoValue}>{booking.nights}</div>
               </div>
             )}
           </div>
@@ -354,29 +433,23 @@ export default function BookingDetail() {
           <div style={styles.infoGrid} className="detail-info-grid">
             <div style={styles.infoItem}>
               <div style={styles.infoLabel}>{t('booking.name')}</div>
-              <div style={styles.infoValue}>{booking.guestName || booking.name || '-'}</div>
+              <div style={styles.infoValue}>{booking.guest_name || '-'}</div>
             </div>
             <div style={styles.infoItem}>
               <div style={styles.infoLabel}>{t('booking.email')}</div>
-              <div style={styles.infoValue}>{booking.guestEmail || booking.email || '-'}</div>
+              <div style={styles.infoValue}>{booking.guest_email || '-'}</div>
             </div>
             <div style={styles.infoItem}>
               <div style={styles.infoLabel}>{t('booking.phone')}</div>
-              <div style={styles.infoValue}>{booking.guestPhone || booking.phone || '-'}</div>
+              <div style={styles.infoValue}>{booking.guest_phone || '-'}</div>
             </div>
-            {(booking.nationality || booking.guestNationality) && (
-              <div style={styles.infoItem}>
-                <div style={styles.infoLabel}>{t('booking.nationality')}</div>
-                <div style={styles.infoValue}>{booking.nationality || booking.guestNationality}</div>
-              </div>
-            )}
           </div>
 
-          {booking.specialRequests && (
+          {booking.special_requests && (
             <>
               <h3 style={styles.sectionTitle}>{t('booking.specialRequests')}</h3>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.7, marginBottom: '32px' }}>
-                {booking.specialRequests}
+                {booking.special_requests}
               </p>
             </>
           )}

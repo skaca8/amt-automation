@@ -1,3 +1,19 @@
+// ============================================================================
+// HotelList — 호텔 목록 페이지 (/hotels)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - URL 쿼리(?checkIn, ?checkOut, ?guests)를 그대로 /hotels API 로 전달해
+//     해당 기간/인원으로 제공 가능한 호텔을 받아 카드 그리드로 보여 준다.
+//   - 추가로 로컬 검색어 필터(name/description)로 클라이언트 사이드 필터링.
+//
+// 렌더 위치: App.jsx 의 /hotels 라우트. lazy-loaded.
+//
+// 주의:
+//   - useSearchParams 가 바뀌면 자동으로 재fetch. SearchBar 에서 navigate
+//     했을 때 그대로 반영된다.
+//   - 응답 shape 은 { hotels } / { data } / raw array 세 가지 모두 허용.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -48,12 +64,18 @@ const styles = {
   },
 }
 
+/**
+ * 호텔 목록 페이지.
+ * - URL 쿼리 → 백엔드 fetch → 카드 그리드 렌더.
+ * - 부작용: searchParams 변경 시 /hotels 재호출.
+ */
 export default function HotelList() {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
   const [hotels, setHotels] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // 클라이언트 사이드 인크리멘털 필터(이름/설명 부분일치).
   const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {

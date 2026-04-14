@@ -104,6 +104,47 @@ npm start
 
 ---
 
+## Google 소셜 로그인 설정 (선택)
+
+고객 사이트 로그인/회원가입 페이지에 "Sign in with Google" 버튼이 있습니다. 별도 설정 없이도 **기존 이메일/비밀번호 로그인은 그대로 동작**하지만, 구글 로그인을 실제로 사용하려면 Google Cloud에서 OAuth 2.0 Web Client ID를 발급받아 환경변수로 주입해야 합니다.
+
+### 1. Google Cloud Console에서 Client ID 발급
+
+1. https://console.cloud.google.com/apis/credentials 접속
+2. **Create Credentials → OAuth client ID → Web application**
+3. **Authorized JavaScript origins**에 `http://localhost:3000` (개발용) / 운영 도메인 추가
+4. **Authorized redirect URIs**는 비워둬도 됩니다 (ID-token 팝업 플로우 사용)
+5. 생성된 **Client ID** 값을 복사 (형식: `123456789-abc....apps.googleusercontent.com`)
+
+### 2. 백엔드에 환경변수 설정
+
+`backend/` 에서 서버를 기동할 때 아래 환경변수를 전달하세요:
+
+```
+GOOGLE_CLIENT_ID=123456789-abc....apps.googleusercontent.com npm start
+```
+
+또는 `backend/.env` 파일을 만들고 `GOOGLE_CLIENT_ID=...` 한 줄을 넣어 `node --env-file=.env src/index.js`로 실행해도 됩니다. 값이 없으면 `/api/auth/google`이 503을 반환해 기능만 꺼집니다.
+
+### 3. 프런트엔드에 환경변수 설정
+
+Vite 빌드 시 동일한 Client ID를 `VITE_GOOGLE_CLIENT_ID`로 주세요:
+
+```
+cd frontend
+VITE_GOOGLE_CLIENT_ID=123456789-abc....apps.googleusercontent.com npm run dev
+```
+
+또는 `frontend/.env.local`에 `VITE_GOOGLE_CLIENT_ID=...`를 저장 (Vite가 자동 로딩). 값이 없으면 Login/Register 페이지의 Google 버튼 자리에 "Google Sign-In is not configured" 안내만 표시됩니다.
+
+### 4. 동작 확인
+
+- 서버 기동 → `/login` 이동 → "Sign in with Google" 버튼 클릭 → 팝업에서 계정 선택
+- 최초 로그인 시 `users` 테이블에 새 행이 생성 (password는 랜덤 해시, `google_id`는 Google `sub`, `avatar_url`은 프로필 이미지)
+- 같은 이메일로 이미 password 회원가입을 했다면 기존 계정에 `google_id`가 자동 연결됨 → 두 방식 모두 같은 계정
+
+---
+
 ## 폴더 구조
 
 ```

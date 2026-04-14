@@ -1,3 +1,24 @@
+// ============================================================================
+// Header — 상단 고정 네비게이션 바
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 로고 · 메인 네비 · 언어 토글 · 내 예약 · 로그인/유저 드롭다운을
+//     데스크톱 가로 레이아웃으로 보여준다.
+//   - 모바일(≤768px) 에서는 햄버거 메뉴로 접어서 풀스크린 오버레이를 연다.
+//   - 스크롤 여부(window.scrollY > 10)에 따라 그림자가 생기는 "sticky"
+//     효과를 제공한다.
+//   - 언어 토글은 i18next 의 언어를 바꾸고 localStorage('language') 에
+//     저장해서 새로고침 후에도 유지한다.
+//
+// 렌더 위치: App.jsx 의 셸 최상단. 모든 페이지에서 공통으로 보인다.
+//
+// 주의:
+//   - useAuth() 를 쓰므로 AuthProvider 트리 안에서만 렌더된다.
+//   - react-router 의 useLocation 에 의존해 pathname 이 바뀔 때마다
+//     모바일 메뉴/유저 메뉴를 자동 닫는다.
+//   - i18n key 의 철자는 en.json/cn.json 에 그대로 있어야 한다.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -194,6 +215,19 @@ const styles = {
   },
 }
 
+/**
+ * 상단 Header.
+ *
+ * 내부 state:
+ *   - scrolled     : 스크롤이 10px 이상 내려가면 true. 그림자 토글.
+ *   - mobileOpen   : 모바일 햄버거 오버레이 열림 여부.
+ *   - userMenuOpen : 데스크톱에서 프로필 드롭다운 열림 여부.
+ *
+ * 부작용:
+ *   - window scroll 이벤트 리스너 등록/해제.
+ *   - i18n.changeLanguage + localStorage 'language' 쓰기.
+ *   - logout 후 navigate('/') 로 홈으로 이동.
+ */
 export default function Header() {
   const { t, i18n } = useTranslation()
   const { isAuthenticated, user, logout } = useAuth()
@@ -203,28 +237,35 @@ export default function Header() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
 
+  // 스크롤 이벤트로 header 그림자 토글. cleanup 으로 리스너 해제.
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 10)
     window.addEventListener('scroll', handleScroll)
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  // 페이지가 바뀌면 메뉴/드롭다운을 자동으로 닫는다.
   useEffect(() => {
     setMobileOpen(false)
     setUserMenuOpen(false)
   }, [location])
 
+  // 언어 토글: en ↔ cn. localStorage 에 저장해 새로고침에도 유지.
   const toggleLang = () => {
     const newLang = i18n.language === 'en' ? 'cn' : 'en'
     i18n.changeLanguage(newLang)
     localStorage.setItem('language', newLang)
   }
 
+  // 로그아웃 후 홈으로 이동. 현재 페이지가 인증이 필요한 화면일 수 있어
+  // 강제로 / 로 보낸다.
   const handleLogout = () => {
     logout()
     navigate('/')
   }
 
+  // 현재 라우트가 네비 항목과 일치하는지. "/" 는 정확 일치만,
+  // 나머지는 prefix 매칭(예: /hotels/123 도 /hotels 활성화).
   const isActive = (path) => {
     if (path === '/') return location.pathname === '/'
     return location.pathname.startsWith(path)

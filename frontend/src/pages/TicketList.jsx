@@ -1,3 +1,15 @@
+// ============================================================================
+// TicketList — 티켓 목록 페이지 (/tickets)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 카테고리 탭(all/ski/activity/entertainment/wellness)으로 /tickets
+//     API 를 재호출해 결과를 카드 그리드로 렌더한다.
+//   - URL 쿼리 ?date 도 그대로 전달해 해당 날짜 가용 티켓만 받을 수 있다.
+//   - 로컬 검색어 입력으로 추가 필터링.
+//
+// 렌더 위치: /tickets 라우트. lazy-loaded.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -74,8 +86,13 @@ const styles = {
   },
 }
 
+// 탭 순서 고정. 'all' 은 서버에 카테고리 파라미터를 보내지 않는 신호.
 const categories = ['all', 'ski', 'activity', 'entertainment', 'wellness']
 
+/**
+ * 티켓 목록 페이지.
+ * 부작용: activeCategory 또는 URL searchParams 변경 시 /tickets 재호출.
+ */
 export default function TicketList() {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()

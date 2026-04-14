@@ -1,13 +1,40 @@
+// ============================================================================
+// /api/admin/dashboard — 관리자 메인 대시보드 통계
+// ----------------------------------------------------------------------------
+// 이 파일이 제공하는 엔드포인트:
+//   GET /overview        — 전체 집계 수치(예약/수익/사용자/상품)
+//   GET /recent-bookings — 최근 예약 10건 (사용자 이름/이메일 join)
+//   GET /revenue-chart   — 최근 30일 일별 매출 (빈 날짜는 0 으로 채움)
+//   GET /booking-chart   — 최근 30일 일별 예약 수 (hotel/ticket/package 분리)
+//
+// 차트 엔드포인트는 누락된 날짜를 0 으로 채워 프런트엔드가 x 축을
+// 재구성할 필요가 없게 만든다. 모든 수익 집계는 `status != 'cancelled'`
+// 조건을 쓰는데, 취소된 예약을 매출로 계산하지 않기 위함이다.
+// ============================================================================
+
 const express = require('express');
 const { getDb } = require('../../config/database');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
 
 const router = express.Router();
 
-// All routes require admin authentication
+// 관리자 인증 필수.
 router.use(authenticate, requireAdmin);
 
-// GET /overview - overall stats
+/**
+ * GET /overview — 대시보드 메인 카드에 쓸 전체 통계.
+ *
+ * 응답:
+ *   {
+ *     total_bookings, total_revenue, total_users,
+ *     products: { hotels, tickets, packages },
+ *     booking_status: { pending, confirmed, cancelled },
+ *     today: { bookings, revenue }
+ *   }
+ *
+ * total_revenue 는 `status != 'cancelled' AND payment_status = 'paid'`
+ * 로 좁혀서 "실제 들어온 돈" 만 계산한다.
+ */
 router.get('/overview', (req, res) => {
   try {
     const db = getDb();
@@ -53,7 +80,11 @@ router.get('/overview', (req, res) => {
   }
 });
 
-// GET /recent-bookings - last 10 bookings
+/**
+ * GET /recent-bookings — 가장 최근 생성된 예약 10건.
+ * 로그인 사용자 이름/이메일을 LEFT JOIN 으로 함께 가져와 UI 테이블에
+ * 바로 렌더링할 수 있게 한다 (게스트 예약은 user_name/user_email 이 null).
+ */
 router.get('/recent-bookings', (req, res) => {
   try {
     const db = getDb();
@@ -73,7 +104,15 @@ router.get('/recent-bookings', (req, res) => {
   }
 });
 
-// GET /revenue-chart - daily revenue for last 30 days
+/**
+ * GET /revenue-chart — 최근 30일 일별 매출 시계열.
+ *
+ * 응답: { data: [{ date, revenue, booking_count }, ...] }
+ *
+ * SQL 로 그룹바이한 결과는 예약이 없는 날짜가 빠져 있으므로, 아래 루프
+ * 에서 빈 날짜를 0 으로 채워 30개 (또는 그 이상) row 를 반환한다.
+ * 이렇게 해야 프런트 차트 라이브러리가 x 축을 끊김 없이 그릴 수 있다.
+ */
 router.get('/revenue-chart', (req, res) => {
   try {
     const db = getDb();
@@ -90,7 +129,8 @@ router.get('/revenue-chart', (req, res) => {
       ORDER BY date ASC
     `).all(startDate);
 
-    // Fill in missing dates with zero revenue
+    // 예약 없는 날짜를 0 매출로 채운다. cursor 루프를 사용해 SQL 결과
+    // 에 빠져 있는 날짜를 감지.
     const result = [];
     const current = new Date(startDate);
     const today = new Date();
@@ -115,7 +155,14 @@ router.get('/revenue-chart', (req, res) => {
   }
 });
 
-// GET /booking-chart - daily booking count for last 30 days
+/**
+ * GET /booking-chart — 최근 30일 일별 예약 수 (상품 타입별로 쪼갬).
+ *
+ * 응답: { data: [{ date, count, hotel_count, ticket_count, package_count }] }
+ *
+ * CASE WHEN 으로 한 번의 쿼리에서 각 타입의 개수를 집계. 빈 날짜는
+ * 위의 revenue-chart 와 같은 방식으로 0 으로 채운다.
+ */
 router.get('/booking-chart', (req, res) => {
   try {
     const db = getDb();

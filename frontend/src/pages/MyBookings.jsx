@@ -1,8 +1,26 @@
+// ============================================================================
+// MyBookings — 내 예약 리스트 페이지 (/my-bookings)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 로그인된 사용자의 예약 전부를 /bookings/my 로 조회해 카드 목록으로
+//     보여 준다. 카드 클릭 시 /my-bookings/:id 상세로 이동.
+//   - pending / confirmed 예약 카드에는 인라인 취소 버튼(PUT
+//     /bookings/:id/cancel)이 노출된다.
+//   - 비로그인 상태면 로그인 유도 박스 + 비회원 OrderLookup 링크 안내.
+//
+// 렌더 위치: /my-bookings. lazy-loaded.
+//
+// 주의:
+//   - booking 필드는 모두 snake_case(check_in/check_out/visit_date/created_at/
+//     booking_number/total_price/product_type). sql.js row 직결.
+//   - 취소는 DELETE 가 아니라 PUT /bookings/:id/cancel 이다(e504ce7).
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
-import { get, del } from '../utils/api'
+import { get, put } from '../utils/api'
 
 const styles = {
   page: {
@@ -129,6 +147,10 @@ const styles = {
   },
 }
 
+/**
+ * 내 예약 리스트 페이지.
+ * 부작용: 로그인 상태가 true 가 되는 즉시 /bookings/my GET 1회.
+ */
 export default function MyBookings() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -136,9 +158,11 @@ export default function MyBookings() {
   const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // 지금 취소 중인 예약의 id. 버튼을 개별로 disabled 처리하는 용도.
   const [cancellingId, setCancellingId] = useState(null)
 
   useEffect(() => {
+    // AuthContext 가 아직 /auth/me 를 확인 중이면 결정 대기.
     if (authLoading) return
     if (!isAuthenticated) {
       setLoading(false)
@@ -160,18 +184,25 @@ export default function MyBookings() {
     fetchBookings()
   }, [isAuthenticated, authLoading])
 
+  /**
+   * 개별 예약 취소.
+   * e.stopPropagation() 으로 카드 클릭(상세 navigate) 이벤트 전파를 막고,
+   * 확인 다이얼로그 통과 시 서버에 취소 요청을 보낸다.
+   * 성공하면 해당 카드만 'cancelled' 로 로컬 상태를 갱신한다.
+   */
   const handleCancel = async (e, bookingId) => {
     e.stopPropagation()
     if (!window.confirm(t('myBookings.confirmCancel'))) return
 
     setCancellingId(bookingId)
     try {
-      await del(`/bookings/${bookingId}`)
+      // 백엔드 계약: PUT /bookings/:id/cancel (authenticated).
+      await put(`/bookings/${bookingId}/cancel`, {})
       setBookings(prev => prev.map(b =>
-        (b._id || b.id) === bookingId ? { ...b, status: 'cancelled' } : b
+        b.id === bookingId ? { ...b, status: 'cancelled' } : b
       ))
     } catch (err) {
-      alert(err.message || 'Failed to cancel booking')
+      alert(err.message || t('common.error'))
     } finally {
       setCancellingId(null)
     }
@@ -187,13 +218,15 @@ export default function MyBookings() {
     return statusMap[status] || 'badge-pending'
   }
 
+  // 카드 요약 줄에 표시할 날짜를 고른다.
+  // 호텔은 check_in/check_out, 티켓·패키지는 visit_date, 그도 없으면
+  // 예약 생성일(created_at)로 fallback. 모두 snake_case 컬럼이다.
   const getDisplayDate = (booking) => {
-    if (booking.checkIn && booking.checkOut) {
-      return `${new Date(booking.checkIn).toLocaleDateString()} - ${new Date(booking.checkOut).toLocaleDateString()}`
+    if (booking.check_in && booking.check_out) {
+      return `${new Date(booking.check_in).toLocaleDateString()} - ${new Date(booking.check_out).toLocaleDateString()}`
     }
-    if (booking.visitDate) return new Date(booking.visitDate).toLocaleDateString()
-    if (booking.startDate) return new Date(booking.startDate).toLocaleDateString()
-    if (booking.createdAt) return new Date(booking.createdAt).toLocaleDateString()
+    if (booking.visit_date) return new Date(booking.visit_date).toLocaleDateString()
+    if (booking.created_at) return new Date(booking.created_at).toLocaleDateString()
     return '-'
   }
 
@@ -238,7 +271,7 @@ export default function MyBookings() {
       {bookings.length > 0 ? (
         <div style={styles.bookingList}>
           {bookings.map(booking => {
-            const bid = booking._id || booking.id
+            const bid = booking.id
             const canCancel = booking.status === 'pending' || booking.status === 'confirmed'
 
             return (
@@ -253,26 +286,26 @@ export default function MyBookings() {
                 <div style={styles.bookingInfo}>
                   <div style={styles.bookingHeader}>
                     <span style={styles.bookingId}>
-                      #{booking.bookingNumber || booking.confirmationNumber || bid?.slice(-8)}
+                      {booking.booking_number || `#${bid}`}
                     </span>
                     <span className={`badge ${getStatusBadge(booking.status)}`}>
                       {t(`statuses.${booking.status || 'pending'}`)}
                     </span>
                   </div>
                   <div style={styles.productName}>
-                    {booking.productName || booking.product?.name || booking.hotel?.name || booking.ticket?.name || booking.package?.name || 'Booking'}
+                    {t(`nav.${booking.product_type}s`, booking.product_type || 'Booking')}
                   </div>
                   <div style={styles.bookingMeta}>
                     <span style={styles.metaItem}>&#128197; {getDisplayDate(booking)}</span>
-                    {booking.type && (
-                      <span style={styles.metaItem}>&#128196; {booking.type}</span>
+                    {booking.product_type && (
+                      <span style={styles.metaItem}>&#128196; {booking.product_type}</span>
                     )}
                   </div>
                 </div>
 
                 <div style={styles.rightSection}>
                   <div style={styles.totalPrice}>
-                    {t('common.currency')} {(booking.totalPrice || booking.total || 0).toLocaleString()}
+                    {t('common.currency')} {Number(booking.total_price || 0).toLocaleString()}
                   </div>
                   <div style={styles.actionBtns}>
                     <Link

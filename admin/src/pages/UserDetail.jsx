@@ -1,12 +1,42 @@
+// ============================================================================
+// Admin — 사용자 상세 페이지 UserDetail
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) URL :id 의 사용자를 조회하고 기본 정보 / 계정 세부사항 / 예약 이력을
+//      한 페이지에 보여 준다.
+//   2) 관리자 권한으로 사용자 프로필(이름/이메일/전화/역할)을 수정할 수 있다.
+//   3) StatsCard 2개로 "총 예약 수" 와 "총 지출액" 을 요약해서 보여 준다.
+//
+// 렌더링 위치: /users/:id.
+//
+// 주의:
+//   - 예약 이력 fetch 실패는 무시하고 빈 배열로 대체한다. 계정 상세 페이지가
+//     부분 데이터로라도 열리는 것이 더 유용하기 때문.
+//   - 역할(role)을 user ↔ admin 으로 바꿀 수 있는 드롭다운은 심각한 권한
+//     변경을 유발하므로 별도의 confirm 은 없지만, 저장 실패 시 alert 로 노출.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { get, put } from '../utils/api'
 import StatusBadge from '../components/StatusBadge'
 import StatsCard from '../components/StatsCard'
 
+/**
+ * UserDetail — 단일 사용자 상세 + 편집 + 예약 이력.
+ *
+ * 부작용:
+ *   - GET /admin/users/:id, GET /admin/users/:id/bookings
+ *   - PUT /admin/users/:id (프로필 수정)
+ *   - navigate('/users'), navigate(`/bookings/:id`)
+ */
 export default function UserDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  // user       : 서버 조회 결과
+  // bookings   : 해당 사용자의 예약 이력
+  // editing    : 프로필 편집 모드 여부
+  // form       : 편집 모드 시 바인딩되는 입력 값들
   const [user, setUser] = useState(null)
   const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
@@ -15,10 +45,12 @@ export default function UserDetail() {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
 
+  // 다른 사용자로 이동하는 경우에도 재조회가 되도록 id 를 deps 에 포함.
   useEffect(() => {
     loadUser()
   }, [id])
 
+  // 사용자 + 예약 이력을 병렬 조회. bookings 쪽은 실패해도 빈 배열 허용.
   const loadUser = async () => {
     setLoading(true)
     setError('')
@@ -43,6 +75,7 @@ export default function UserDetail() {
     }
   }
 
+  // 프로필 저장. 성공 시 편집 모드 종료 + 재조회. 실패 시 alert.
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -103,6 +136,8 @@ export default function UserDetail() {
 
   if (!user) return null
 
+  // 지출 총합. 개별 예약의 total_price / total_amount 둘 다 허용하며
+  // null 은 0 으로 간주한다. (취소/환불 구분 없이 단순 합산임에 유의.)
   const totalSpent = bookings.reduce((sum, b) => sum + (b.total_price || b.total_amount || 0), 0)
 
   return (

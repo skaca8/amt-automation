@@ -1,7 +1,30 @@
+// ============================================================================
+// Admin — 좌측 고정 Sidebar 네비게이션
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) 어드민의 고정 좌측 메뉴를 렌더링. 각 메뉴 항목은 NavLink 로 구현되어
+//      현재 URL 과 매칭되면 활성 스타일이 붙는다.
+//   2) "Products" 항목은 자식 메뉴를 가진 접이식(accordion) 그룹이다.
+//   3) 하단에 로그인된 사용자 정보와 로그아웃 버튼을 표시한다.
+//   4) 1024px 이하(tablet) 에서는 햄버거 버튼 + 오버레이로 열고 닫는다.
+//
+// 렌더링 위치: App.jsx → AdminLayout 안에서 한 번만 mount 된다.
+// 페이지 간 이동 시 unmount 되지 않으므로 expandedItems / mobileOpen 등 로컬
+// state 가 유지된다.
+//
+// 주의:
+//   - styles 객체는 의도적으로 JS 안에 인라인으로 선언되어 있다. 키 순서·값을
+//     리팩토링하지 말 것(시각적 회귀가 쉽게 생긴다).
+//   - mobile 미디어쿼리는 스타일드 컴포넌트가 아니라 하단 <style> 태그에서
+//     처리한다. "display: none !important" 를 이길 수 있도록 class-based 규칙.
+// ============================================================================
+
 import React, { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
+// 네비게이션 항목 정의. children 이 있으면 접이식 그룹으로 렌더된다.
+// icon 은 이모지 유니코드(\ud83d\udcca 등)로 컴파일 타임 상수로 유지한다.
 const navItems = [
   { path: '/', icon: '\ud83d\udcca', label: 'Dashboard', exact: true },
   { path: '/bookings', icon: '\ud83d\udccb', label: 'Bookings' },
@@ -17,6 +40,9 @@ const navItems = [
   },
   { path: '/users', icon: '\ud83d\udc65', label: 'Users' },
   { path: '/payments', icon: '\ud83d\udcb3', label: 'Payments' },
+  // Access Codes — "특정 유저 × 특정 상품" 에 대한 구매 게이트 코드 발급/관리.
+  // 아이콘 🎟️ (U+1F39F) 는 티켓 느낌. 상품 게이트 이미지로 자연스럽다.
+  { path: '/access-codes', icon: '\ud83c\udf9f\ufe0f', label: 'Access Codes' },
   { path: '/settings', icon: '\u2699\ufe0f', label: 'Settings' },
 ]
 
@@ -208,6 +234,20 @@ const styles = {
   },
 }
 
+/**
+ * Sidebar — 어드민 좌측 네비게이션 바.
+ *
+ * Props: 없음. useAuth() 로 사용자 정보를 구독하고, useLocation() 으로
+ * 현재 경로를 읽어 활성 상태를 결정한다.
+ *
+ * 렌더링하는 UI:
+ *   - 모바일용 햄버거 버튼 (md 이상에서는 CSS 로 숨김)
+ *   - aside 사이드바: 로고 / nav / 사용자 섹션(이름·로그아웃)
+ *
+ * 부작용:
+ *   - logout() 호출 시 AuthContext 상태 초기화 → ProtectedRoute 가
+ *     /login 으로 리다이렉트.
+ */
 export default function Sidebar() {
   const { user, logout } = useAuth()
   const location = useLocation()

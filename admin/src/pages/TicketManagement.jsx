@@ -1,3 +1,26 @@
+// ============================================================================
+// Admin — 티켓(스키 패스 등) 관리 페이지 TicketManagement
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) 티켓 상품 목록 조회/생성/수정/삭제(soft delete).
+//   2) Featured 토글 & sort_order 조정.
+//   3) 각 티켓에 대해 재고 관리 모달(BulkInventoryManager) 과
+//      프로모션 관리 모달(PromotionManager) 을 띄워 임베드 컴포넌트에 위임.
+//
+// 렌더링 위치: /products/tickets 라우트.
+//
+// 백엔드 엔드포인트:
+//   GET    /admin/products/tickets
+//   POST   /admin/products/tickets
+//   PUT    /admin/products/tickets/:id
+//   DELETE /admin/products/tickets/:id
+//   PUT    /admin/products/featured     (featured / sort_order)
+//
+// 주의:
+//   - HotelManagement 와 UI 패턴이 매우 비슷하지만, 티켓은 호텔 ↔ 객실 타입
+//     같은 하위 리소스가 없어 드로어 확장 로직이 없다.
+// ============================================================================
+
 import React, { useState, useEffect, useCallback } from 'react'
 import { get, post, put, del } from '../utils/api'
 import StatusBadge from '../components/StatusBadge'
@@ -7,13 +30,23 @@ import RichTextEditor from '../components/RichTextEditor'
 import BulkInventoryManager from '../components/BulkInventoryManager'
 import PromotionManager from '../components/PromotionManager'
 
+// 신규 티켓 폼의 초기값.
 const emptyTicket = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
   category: '', price: '', status: 'active', images: [],
   is_featured: 0, sort_order: 0,
+  // is_restricted: access-code 구매 게이트 플래그. hotel/ticket/package 동일 정책.
+  is_restricted: 0,
 }
 
+/**
+ * TicketManagement — 티켓 상품 CRUD + 재고/프로모션 진입 UI.
+ *
+ * 부작용: /admin/products/tickets 및 /admin/products/featured 에 대한
+ * GET/POST/PUT/DELETE. 이미지 업로드는 ImageUploader 가 /admin/upload 호출.
+ */
 export default function TicketManagement() {
+  // 기본 목록/모달 상태 — HotelManagement 의 호텔 섹션과 동일 패턴.
   const [tickets, setTickets] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -22,11 +55,11 @@ export default function TicketManagement() {
   const [form, setForm] = useState({ ...emptyTicket })
   const [saving, setSaving] = useState(false)
 
-  // Inventory modal state
+  // 재고 모달: 어떤 티켓의 재고를 편집 중인지 추적.
   const [showInventoryModal, setShowInventoryModal] = useState(false)
   const [inventoryTicket, setInventoryTicket] = useState(null)
 
-  // Promotions modal state
+  // 프로모션 모달: 어떤 티켓 범위의 프로모션을 관리 중인지.
   const [showPromotionsModal, setShowPromotionsModal] = useState(false)
   const [promotionsTicket, setPromotionsTicket] = useState(null)
 
@@ -47,6 +80,7 @@ export default function TicketManagement() {
     loadTickets()
   }, [loadTickets])
 
+  // Featured 토글 - optimistic UI, 실패 시 원복. HotelManagement 와 동일 패턴.
   const toggleFeatured = async (ticket) => {
     const tid = ticket._id || ticket.id
     const newVal = ticket.is_featured ? 0 : 1
@@ -69,12 +103,14 @@ export default function TicketManagement() {
     }
   }
 
+  // ---------- 티켓 CRUD ----------
   const openAdd = () => {
     setEditing(null)
     setForm({ ...emptyTicket })
     setShowModal(true)
   }
 
+  // 편집 모달 열기. price / base_price 두 가지 필드명을 모두 허용.
   const openEdit = (ticket) => {
     setEditing(ticket)
     setForm({
@@ -88,10 +124,13 @@ export default function TicketManagement() {
       images: ticket.images || [],
       is_featured: ticket.is_featured || 0,
       sort_order: ticket.sort_order || 0,
+      // 기존 티켓 수정 모달 진입 시 access-code 게이트 플래그 동기화.
+      is_restricted: ticket.is_restricted || 0,
     })
     setShowModal(true)
   }
 
+  // 저장. UI 에서는 'price' 로 받지만 서버 스키마는 'base_price' 라 변환한다.
   const saveTicket = async () => {
     setSaving(true)
     try {
@@ -120,11 +159,13 @@ export default function TicketManagement() {
     }
   }
 
+  // 재고 모달: BulkInventoryManager 에 ticket id 를 넘겨 위임.
   const openInventoryModal = (ticket) => {
     setInventoryTicket(ticket)
     setShowInventoryModal(true)
   }
 
+  // 프로모션 모달: PromotionManager 에 ticket id 를 넘겨 위임.
   const openPromotionsModal = (ticket) => {
     setPromotionsTicket(ticket)
     setShowPromotionsModal(true)
@@ -356,6 +397,23 @@ export default function TicketManagement() {
               placeholder="0"
             />
           </div>
+        </div>
+        {/* Restricted 토글 — access code 구매 게이트 플래그.
+            hotel/package 관리 페이지와 동일 패턴. */}
+        <div className="form-group">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={form.is_restricted === 1}
+              onChange={(e) => setForm({ ...form, is_restricted: e.target.checked ? 1 : 0 })}
+              style={{ width: 18, height: 18, cursor: 'pointer' }}
+            />
+            <span>{'\u{1F512}'} Restricted (access code required to book)</span>
+          </label>
+          <small style={{ color: '#64748b', marginLeft: 26 }}>
+            When enabled, only users with a matching access code can book this ticket.
+            Issue codes on the "Access Codes" page.
+          </small>
         </div>
         <div className="form-group">
           <label>Images</label>

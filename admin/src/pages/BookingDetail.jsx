@@ -1,12 +1,50 @@
+// ============================================================================
+// Admin — 예약 상세 페이지 BookingDetail
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) URL 파라미터 :id 를 읽어 /admin/bookings/:id 를 조회하고, 예약 정보
+//      (기본/게스트/상품/결제/바우처) 를 카드 그리드로 보여 준다.
+//   2) 상태(status) 변경 UI: 드롭다운 + Update 버튼 → PUT /status.
+//   3) 전체 취소 버튼: status=cancelled 로 한번에 변경 (window.confirm 으로 재확인).
+//   4) 환불 버튼: 모달을 띄워 reason 을 받고 POST /refund 호출.
+//      환불이 성공하면 백엔드에서 재고가 자동 복구된다(재고 무결성 유지).
+//
+// 렌더링 위치: /bookings/:id. BookingManagement 행 클릭으로 진입.
+//
+// 주의:
+//   - canCancel / canRefund 는 현재 상태에 따라 버튼 노출 여부를 제어한다.
+//     완료/취소/환불 상태에선 추가 조작을 막아 상태 역행을 방지한다.
+//   - 백엔드 응답 키가 snake_case / camelCase 혼재라 주요 필드마다 fallback
+//     을 적어 뒀다.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { get, put, post } from '../utils/api'
 import StatusBadge from '../components/StatusBadge'
 import Modal from '../components/Modal'
 
+/**
+ * BookingDetail — 예약 상세 + 상태/환불 조작 페이지.
+ *
+ * Props: 없음 (URL param 의 :id 로 대상 지정).
+ *
+ * 부작용:
+ *   - GET /admin/bookings/:id
+ *   - PUT /admin/bookings/:id/status
+ *   - POST /admin/bookings/:id/refund
+ *   - navigate('/bookings') (뒤로가기 링크)
+ */
 export default function BookingDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  // booking          : 서버에서 받은 예약 객체
+  // loading/error    : 초기 조회 UI 상태
+  // updating         : 상태 변경/취소 API 호출 중 플래그
+  // statusValue      : 드롭다운에 현재 바인딩된 값 (임시, Update 버튼으로 확정)
+  // showRefundModal  : 환불 모달 오픈 여부
+  // refundReason     : 환불 사유 (textarea)
+  // refundProcessing : 환불 API 호출 중 플래그
   const [booking, setBooking] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -16,10 +54,12 @@ export default function BookingDetail() {
   const [refundReason, setRefundReason] = useState('')
   const [refundProcessing, setRefundProcessing] = useState(false)
 
+  // URL 의 :id 가 바뀔 때(예: 상세에서 다른 상세로 이동)도 다시 로드.
   useEffect(() => {
     loadBooking()
   }, [id])
 
+  // 초기/재조회. 응답 래핑 방식 차이(booking / data / root) 를 허용한다.
   const loadBooking = async () => {
     setLoading(true)
     setError('')
@@ -35,6 +75,7 @@ export default function BookingDetail() {
     }
   }
 
+  // 상태 변경: 드롭다운 값이 현재와 같거나 비어 있으면 무시.
   const handleStatusUpdate = async () => {
     if (!statusValue || statusValue === booking.status) return
     setUpdating(true)
@@ -48,6 +89,7 @@ export default function BookingDetail() {
     }
   }
 
+  // 전체 취소: status 를 'cancelled' 로 일괄 변경. 백엔드에서 재고가 복구된다.
   const handleCancelBooking = async () => {
     if (!window.confirm('Are you sure you want to cancel this booking?')) return
     setUpdating(true)
@@ -61,6 +103,8 @@ export default function BookingDetail() {
     }
   }
 
+  // 환불: 모달에서 입력한 reason 을 함께 POST. 성공 시 모달 닫고 재조회.
+  // 서버 처리 결과로 payment_status 가 'refunded' 로 바뀌고, 재고도 복구된다.
   const handleRefund = async () => {
     setRefundProcessing(true)
     try {
@@ -122,6 +166,8 @@ export default function BookingDetail() {
 
   if (!booking) return null
 
+  // 액션 가능 여부. "완료/취소" 상태에선 재취소 불가,
+  // "결제 완료 + 아직 환불 안 됨" 상태에서만 환불 가능.
   const canCancel = booking.status !== 'cancelled' && booking.status !== 'completed'
   const canRefund = (booking.payment_status === 'paid') &&
     booking.status !== 'refunded'

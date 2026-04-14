@@ -1,3 +1,21 @@
+// ============================================================================
+// Footer — 공용 하단 푸터
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 모든 페이지 하단에 4-컬럼(브랜드 / Explore / Support / Contact)
+//     그리드를 렌더한다.
+//   - 언어에 따라 t('footer.*') 번역 키로 텍스트를 치환한다.
+//
+// 렌더 위치: App.jsx 의 최하단에 고정. flex column 레이아웃에서
+//            marginTop: 'auto' 로 화면 하단에 붙는다.
+//
+// 주의:
+//   - 순수 presentational. 상태/부작용 없음.
+//   - Support 섹션의 About/FAQ 등은 아직 라우트가 없어 <span> 비활성 링크다.
+//   - 미디어 쿼리는 styled-string <style> 태그로 inline 처리되어 있어
+//     JSX style 객체와 별개다.
+// ============================================================================
+
 import React from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -118,6 +136,11 @@ const styles = {
   },
 }
 
+/**
+ * 공용 Footer 컴포넌트.
+ * - 상태 없음, 부작용 없음. i18n 번역만 소비한다.
+ * - 반응형은 하단의 <style> 블록이 담당한다.
+ */
 export default function Footer() {
   const { t } = useTranslation()
 
@@ -125,7 +148,7 @@ export default function Footer() {
     <footer style={styles.footer}>
       <div style={styles.container}>
         <div style={styles.grid} className="footer-grid">
-          {/* Brand */}
+          {/* 브랜드/로고/SNS 블록 */}
           <div style={styles.brand} className="footer-brand">
             <div style={styles.logo}>
               <span style={styles.logoIcon}>&#9968;</span>

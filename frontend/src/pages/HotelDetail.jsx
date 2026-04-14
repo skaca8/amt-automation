@@ -1,3 +1,27 @@
+// ============================================================================
+// HotelDetail — 호텔 상세 페이지 (/hotels/:id)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 호텔 1건과 그 아래 객실 타입(room_types) 배열을 /hotels/:id 에서 받아
+//     히어로 이미지, 기본 정보, 어메니티, 객실 카드 목록으로 렌더한다.
+//   - 사이드바에서 체크인/체크아웃 날짜를 고르고 "가용성 확인" 을 누르면
+//     /hotels/:id/availability?check_in=...&check_out=... 로 재조회해 각
+//     객실의 available 여부를 반영한다.
+//   - 객실 카드의 "Book Now" 를 누르면 쿼리 파라미터(roomType, checkIn,
+//     checkOut) 와 함께 /booking/hotel/:id 로 navigate 한다.
+//
+// 렌더 위치: /hotels/:id 라우트. lazy-loaded.
+//
+// 주의:
+//   - 백엔드는 snake_case(room_types, check_in, check_out, max_guests,
+//     bed_type, base_price) 를 쓰지만 과거 camelCase 응답이 혼재한 적이 있어
+//     두 표기 모두 fallback 으로 읽는다.
+//   - description 이 HTML 이면 dangerouslySetInnerHTML 로 렌더한다(관리자가
+//     rich text 로 입력 가능). XSS 위험은 어드민 신뢰 가정 하에 수용.
+//   - 가격은 'room.price || basePrice || base_price' 순으로 읽고 원화 기호
+//     통화 기호는 i18n 키(common.currencySymbol)로 분리되어 있다.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -245,6 +269,10 @@ const styles = {
   },
 }
 
+/**
+ * images 필드를 배열로 정규화한다. 배열/JSON 문자열/null 세 형태 지원.
+ * ProductCard 에도 같은 헬퍼가 있지만 페이지 단독으로 재사용할 수 있도록 복제.
+ */
 function parseImages(images) {
   if (!images) return []
   if (Array.isArray(images)) return images
@@ -254,6 +282,21 @@ function parseImages(images) {
   return []
 }
 
+/**
+ * 호텔 상세 페이지.
+ *
+ * 내부 state:
+ *   - hotel         : 호텔 본체(이름/주소/설명 등)
+ *   - roomTypesList : 객실 타입 배열(백엔드가 평탄화해서 내려줌)
+ *   - checkIn/Out   : 사이드바의 체크인/아웃 state. 예약 페이지로도 전달.
+ *   - availability  : /hotels/:id/availability 응답. 객실별 available 판단용
+ *   - heroIdx       : 히어로 썸네일 캐러셀 현재 인덱스
+ *
+ * 부작용:
+ *   - 마운트 또는 :id 변경 시 /hotels/:id GET
+ *   - "Check availability" 클릭 시 /hotels/:id/availability GET
+ *   - "Book Now" 클릭 시 /booking/hotel/:id?roomType=..&checkIn=..&checkOut=.. navigate
+ */
 export default function HotelDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -269,12 +312,17 @@ export default function HotelDetail() {
   const [checkingAvail, setCheckingAvail] = useState(false)
   const [heroIdx, setHeroIdx] = useState(0)
 
+  // --------------------------------------------------------------------------
+  // 초기 상세 fetch
+  // --------------------------------------------------------------------------
   useEffect(() => {
     const fetchHotel = async () => {
       setLoading(true)
       try {
         const data = await get(`/hotels/${id}`)
+        // 응답 shape 은 { hotel, room_types } 또는 레거시 hotel 객체 그 자체.
         setHotel(data.hotel || data)
+        // 객실 타입 배열도 snake_case/camelCase/nested 세 가지 위치를 모두 허용.
         setRoomTypesList(data.room_types || data.roomTypes || (data.hotel || data).roomTypes || [])
       } catch (err) {
         setError(err.message)
@@ -285,6 +333,14 @@ export default function HotelDetail() {
     fetchHotel()
   }, [id])
 
+  // --------------------------------------------------------------------------
+  // 가용성 확인
+  // --------------------------------------------------------------------------
+  /**
+   * 백엔드에 체크인/아웃 날짜로 객실별 재고를 문의한다.
+   * 쿼리 파라미터는 반드시 snake_case (check_in, check_out). e504ce7 커밋에서
+   * 백엔드 계약을 snake_case 로 정규화했다.
+   */
   const checkAvailability = async () => {
     if (!checkIn || !checkOut) return
     setCheckingAvail(true)
@@ -298,6 +354,10 @@ export default function HotelDetail() {
     }
   }
 
+  /**
+   * "Book Now" 클릭 핸들러. 선택된 객실 타입 ID 와 체크인/아웃을
+   * 쿼리 파라미터로 넘겨 BookingPage 로 이동한다.
+   */
   const handleBookRoom = (roomType) => {
     const rtId = roomType._id || roomType.id
     const params = new URLSearchParams()
@@ -325,8 +385,10 @@ export default function HotelDetail() {
 
   const roomTypes = roomTypesList
   const hotelImages = parseImages(hotel.images)
+  // 현재 언어에 맞는 bilingual 필드 우선. 누락 시 반대 언어로 fallback.
   const hotelName = (lang === 'cn' || lang === 'zh') ? (hotel.name_cn || hotel.name_en || hotel.name) : (hotel.name_en || hotel.name)
   const hotelDesc = (lang === 'cn' || lang === 'zh') ? (hotel.description_cn || hotel.description_en || hotel.description) : (hotel.description_en || hotel.description)
+  // 관리자가 rich HTML 로 입력했으면 <tag> 패턴이 잡힌다 → dangerouslySetInnerHTML.
   const isHtmlDesc = hotelDesc && typeof hotelDesc === 'string' && /<[a-z][\s\S]*>/i.test(hotelDesc)
 
   return (
@@ -374,6 +436,27 @@ export default function HotelDetail() {
       <div style={styles.infoSection} className="hotel-info-grid">
         <div style={styles.mainInfo}>
           <h1 style={styles.hotelName}>{hotelName}</h1>
+          {/* is_restricted=1 호텔에는 상단에 inline 배지 노출. 예약 페이지
+              로 가면 access_code 입력 칸이 나타난다. */}
+          {hotel.is_restricted === 1 && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '5px 12px',
+              borderRadius: 20,
+              background: 'rgba(124, 58, 237, 0.1)',
+              border: '1px solid rgba(124, 58, 237, 0.4)',
+              color: '#6d28d9',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              marginBottom: 12,
+            }}>
+              {'\u{1F512}'} {t('booking.restrictedBadge')}
+            </div>
+          )}
           <div style={styles.ratingRow}>
             {hotel.rating && (
               <span style={styles.ratingBadge}>&#9733; {hotel.rating}</span>
@@ -483,7 +566,8 @@ export default function HotelDetail() {
                       </div>
                       <div style={styles.roomPriceCol}>
                         <div style={styles.roomPrice}>
-                          {'\u20A9'}{(room.price || room.basePrice || room.base_price || 0).toLocaleString()}
+                          {/* 통화 기호는 i18n 키로 분리 — locale 에 따라 ₩/¥/$ 등으로 교체 가능. */}
+                          {t('common.currencySymbol')}{(room.price || room.basePrice || room.base_price || 0).toLocaleString()}
                         </div>
                         <div style={styles.roomPriceUnit}>/ room / night</div>
                         {checkIn && checkOut && (() => {
@@ -496,10 +580,10 @@ export default function HotelDetail() {
                               border: '1px solid #e2e8f0', marginBottom: 10, textAlign: 'left'
                             }}>
                               <div style={{ fontSize: '0.8rem', color: '#475569', marginBottom: 4 }}>
-                                {nights} night{nights > 1 ? 's' : ''} {'\u00D7'} {'\u20A9'}{roomPrice.toLocaleString()}
+                                {nights} night{nights > 1 ? 's' : ''} {'\u00D7'} {t('common.currencySymbol')}{roomPrice.toLocaleString()}
                               </div>
                               <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1a73e8' }}>
-                                Total: {'\u20A9'}{roomTotal.toLocaleString()}
+                                Total: {t('common.currencySymbol')}{roomTotal.toLocaleString()}
                               </div>
                             </div>
                           )

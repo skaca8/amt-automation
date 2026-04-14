@@ -1,3 +1,21 @@
+// ============================================================================
+// TicketDetail — 티켓 상세 페이지 (/tickets/:id)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - /tickets/:id 에서 티켓 1건을 받아 히어로 이미지, 카테고리 배지, 설명,
+//     메타(기간/장소)를 렌더한다.
+//   - 사이드바에 "방문 날짜 + 수량" 선택 UI 를 두고, 단가×수량을 실시간으로
+//     Total 에 반영한다.
+//   - "Book Now" 를 누르면 /booking/ticket/:id?date=..&quantity=.. 로 이동.
+//
+// 렌더 위치: /tickets/:id 라우트. lazy-loaded.
+//
+// 주의:
+//   - 가격 필드는 price / basePrice / base_price 세 가지 위치를 모두 읽어
+//     백엔드 응답 변천사에 대응한다.
+//   - description 은 HTML 여부를 감지해 dangerouslySetInnerHTML 로 렌더.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -193,6 +211,7 @@ const styles = {
   },
 }
 
+/** images 를 배열로 정규화(배열/JSON 문자열/null 모두 허용). */
 function parseImages(images) {
   if (!images) return []
   if (Array.isArray(images)) return images
@@ -202,6 +221,17 @@ function parseImages(images) {
   return []
 }
 
+/**
+ * 티켓 상세 페이지.
+ *
+ * 내부 state:
+ *   - ticket    : 티켓 본체
+ *   - visitDate : 방문 희망일('YYYY-MM-DD')
+ *   - quantity  : 구매 수량(1~20)
+ *   - heroIdx   : 히어로 썸네일 인덱스
+ *
+ * 부작용: 마운트 시 /tickets/:id GET, "Book Now" 시 navigate.
+ */
 export default function TicketDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -229,6 +259,8 @@ export default function TicketDetail() {
     fetchTicket()
   }, [id])
 
+  // 방문일/수량을 쿼리 파라미터로 넘기며 예약 페이지로 이동.
+  // BookingPage 가 type='ticket' 분기에서 이 값을 읽어 초기 상태로 세팅한다.
   const handleBook = () => {
     const params = new URLSearchParams()
     if (visitDate) params.set('date', visitDate)
@@ -306,6 +338,27 @@ export default function TicketDetail() {
           {ticket.category && (
             <span style={styles.categoryBadge}>{ticket.category}</span>
           )}
+          {/* is_restricted=1 티켓은 상단에 inline "Invite only" 배지 노출.
+              예약 페이지에서 access_code 입력 필드가 나타난다. */}
+          {ticket.is_restricted === 1 && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '5px 12px',
+              borderRadius: 20,
+              background: 'rgba(124, 58, 237, 0.1)',
+              border: '1px solid rgba(124, 58, 237, 0.4)',
+              color: '#6d28d9',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              marginLeft: 8,
+            }}>
+              {'\u{1F512}'} {t('booking.restrictedBadge')}
+            </div>
+          )}
 
           <h1 style={styles.name}>{ticketName}</h1>
 
@@ -368,7 +421,8 @@ export default function TicketDetail() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem', color: '#475569' }}>
               <span>Unit Price</span>
-              <span>{'\u20A9'}{price.toLocaleString()} / person</span>
+              {/* 통화 기호는 i18n 키로 분리 (common.currencySymbol). */}
+              <span>{t('common.currencySymbol')}{price.toLocaleString()} / person</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem', color: '#475569' }}>
               <span>Quantity</span>
@@ -377,7 +431,7 @@ export default function TicketDetail() {
             <div style={{ borderTop: '2px solid #e2e8f0', paddingTop: 12, marginTop: 8,
               display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem', fontWeight: 700, color: '#1e293b' }}>
               <span>Total</span>
-              <span style={{ color: '#1a73e8' }}>{'\u20A9'}{total.toLocaleString()}</span>
+              <span style={{ color: '#1a73e8' }}>{t('common.currencySymbol')}{total.toLocaleString()}</span>
             </div>
           </div>
 

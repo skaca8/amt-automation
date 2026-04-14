@@ -1,3 +1,32 @@
+// ============================================================================
+// Admin — 호텔 관리 페이지 HotelManagement
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) 호텔 목록을 조회·생성·수정·삭제(soft delete) 한다.
+//   2) 각 호텔 행을 확장하면 해당 호텔의 Room Type(객실 타입) 목록이 나타나고,
+//      거기서 객실 타입 자체도 CRUD 할 수 있다.
+//   3) 객실 타입 레벨에서 "재고 관리 모달" 과 "프로모션 관리 모달" 을 띄운다.
+//      - 재고: <BulkInventoryManager productType="room" productId={roomTypeId} />
+//      - 프로모션: <PromotionManager productType="hotel" productId={hotelId} />
+//   4) "Featured" 토글과 sort_order 업데이트로 프런트엔드 홈화면 노출을 제어.
+//
+// 렌더링 위치: /products/hotels 라우트.
+//
+// 백엔드 엔드포인트 요약:
+//   GET    /admin/products                     (호텔 목록)
+//   POST   /admin/products/hotels              (호텔 생성)
+//   PUT    /admin/products/hotels/:id          (호텔 수정)
+//   DELETE /admin/products/hotels/:id          (호텔 soft delete)
+//   GET    /admin/products/room-types?hotel_id=
+//   POST/PUT/DELETE  /admin/products/room-types(/:id)
+//   PUT    /admin/products/featured            (featured 플래그/정렬)
+//
+// 주의:
+//   - Featured 토글은 optimistic UI 이다. 서버 실패 시 즉시 값 복구.
+//   - amenities 는 서버에 ','-구분 문자열로 저장되며 UI 도 그대로 노출.
+//   - description_en/cn 은 RichTextEditor 의 innerHTML 문자열이다.
+// ============================================================================
+
 import React, { useState, useEffect, useCallback } from 'react'
 import { get, post, put, del } from '../utils/api'
 import StatusBadge from '../components/StatusBadge'
@@ -7,20 +36,45 @@ import RichTextEditor from '../components/RichTextEditor'
 import BulkInventoryManager from '../components/BulkInventoryManager'
 import PromotionManager from '../components/PromotionManager'
 
+// 새 호텔 생성 시 사용하는 초기 폼 값.
 const emptyHotel = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
   address: '', amenities: '', status: 'active', images: [],
   is_featured: 0, sort_order: 0,
+  // is_restricted: 1 이면 이 호텔은 access code 가 있는 유저만 예약 가능.
+  // 기본값은 0 — 신규 호텔은 공개 예약 가능한 상태.
+  is_restricted: 0,
 }
 
+// 새 객실 타입 생성 시 초기 폼 값. max_guests 는 2명 기본.
 const emptyRoom = {
   name_en: '', name_cn: '', description_en: '', description_cn: '',
   max_guests: 2, bed_type: '', base_price: '', status: 'active', images: [],
 }
 
+// 드롭다운용 고정 옵션. DB 에는 문자열 그대로 저장된다.
 const BED_TYPES = ['Single', 'Double', 'Twin', 'Queen', 'King', 'Suite']
 
+/**
+ * HotelManagement — 호텔/객실 타입 CRUD + 재고/프로모션 진입 UI.
+ *
+ * Props: 없음.
+ *
+ * 부작용:
+ *   - /admin/products, /admin/products/hotels, /admin/products/room-types,
+ *     /admin/products/featured 에 대한 GET/POST/PUT/DELETE.
+ *   - 모달 열기/닫기, 목록 재조회.
+ */
 export default function HotelManagement() {
+  // ----------------------------------------------------------------------
+  // 호텔 레벨 상태
+  //   hotels         : 호텔 목록
+  //   showHotelModal : 호텔 생성/수정 모달
+  //   editingHotel   : 수정 대상 호텔 (null 이면 생성)
+  //   hotelForm      : 현재 편집 중 폼 값
+  //   saving         : 저장 버튼 disable 플래그
+  //   expandedHotel  : 현재 확장된 호텔의 id (객실 타입 드로어)
+  // ----------------------------------------------------------------------
   const [hotels, setHotels] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -29,17 +83,25 @@ export default function HotelManagement() {
   const [hotelForm, setHotelForm] = useState({ ...emptyHotel })
   const [saving, setSaving] = useState(false)
   const [expandedHotel, setExpandedHotel] = useState(null)
+
+  // ----------------------------------------------------------------------
+  // 객실 타입 상태 (확장된 호텔 기준)
+  //   roomTypes      : 현재 확장된 호텔의 객실 타입 배열
+  //   showRoomModal  : 객실 타입 생성/수정 모달
+  //   editingRoom    : 수정 대상 객실 타입
+  //   roomForm       : 현재 편집 중 객실 폼
+  // ----------------------------------------------------------------------
   const [roomTypes, setRoomTypes] = useState([])
   const [loadingRooms, setLoadingRooms] = useState(false)
   const [showRoomModal, setShowRoomModal] = useState(false)
   const [editingRoom, setEditingRoom] = useState(null)
   const [roomForm, setRoomForm] = useState({ ...emptyRoom })
 
-  // Inventory modal state
+  // 재고 관리 모달: 어느 객실 타입의 재고를 편집 중인지.
   const [showInventoryModal, setShowInventoryModal] = useState(false)
   const [inventoryRoom, setInventoryRoom] = useState(null)
 
-  // Promotions modal state
+  // 프로모션 모달: 어느 호텔 범위의 프로모션을 관리 중인지.
   const [showPromotionsModal, setShowPromotionsModal] = useState(false)
   const [promotionsHotelId, setPromotionsHotelId] = useState(null)
 
@@ -72,6 +134,11 @@ export default function HotelManagement() {
     }
   }
 
+  // ----------------------------------------------------------------------
+  // toggleFeatured — "홈 화면 피처드" 플래그 토글.
+  // optimistic update: 먼저 UI 를 바꾸고, 서버가 실패하면 원상 복구.
+  // (롤백 시 그냥 이전 hotel.is_featured 값을 다시 쓰면 된다.)
+  // ----------------------------------------------------------------------
   const toggleFeatured = async (hotel) => {
     const hid = hotel._id || hotel.id
     const newVal = hotel.is_featured ? 0 : 1
@@ -83,6 +150,9 @@ export default function HotelManagement() {
     }
   }
 
+  // 정렬 순서 업데이트. 숫자 입력이 바뀔 때마다 optimistic 반영.
+  // 실패 시 롤백을 생략한 이유: 정렬은 사용자에게 시각적 크리티컬 수준이
+  // 아니며, 다음 새로고침에서 자연스레 서버 값이 다시 반영된다.
   const updateSortOrder = async (hotel, newOrder) => {
     const hid = hotel._id || hotel.id
     const val = Number(newOrder) || 0
@@ -94,6 +164,7 @@ export default function HotelManagement() {
     }
   }
 
+  // 같은 호텔을 다시 누르면 접고, 다른 호텔이면 확장 + 객실 타입 로드.
   const toggleExpand = (hotelId) => {
     if (expandedHotel === hotelId) {
       setExpandedHotel(null)
@@ -104,13 +175,16 @@ export default function HotelManagement() {
     }
   }
 
-  // Hotel CRUD
+  // ---------- 호텔 CRUD 핸들러 ----------
+  // 신규 호텔 생성 모달 열기.
   const openAddHotel = () => {
     setEditingHotel(null)
     setHotelForm({ ...emptyHotel })
     setShowHotelModal(true)
   }
 
+  // 기존 호텔 수정 모달 열기. amenities 는 서버에서 배열로 내려오면 쉼표
+  // 문자열로 합쳐서 input 에 넣어 준다(사용자는 쉼표 구분으로 편집).
   const openEditHotel = (hotel) => {
     setEditingHotel(hotel)
     setHotelForm({
@@ -124,15 +198,19 @@ export default function HotelManagement() {
       images: hotel.images || [],
       is_featured: hotel.is_featured || 0,
       sort_order: hotel.sort_order || 0,
+      // 기존 호텔을 수정 모드로 열 때도 access-code 게이트 플래그를 미리 채운다.
+      is_restricted: hotel.is_restricted || 0,
     })
     setShowHotelModal(true)
   }
 
+  // 저장: amenities 문자열을 서버용 배열로 파싱한 뒤 PUT/POST 호출.
   const saveHotel = async () => {
     setSaving(true)
     try {
       const payload = {
         ...hotelForm,
+        // 'Pool, Gym, Spa' → ['Pool','Gym','Spa']. 빈 값은 제거.
         amenities: typeof hotelForm.amenities === 'string'
           ? hotelForm.amenities.split(',').map((a) => a.trim()).filter(Boolean)
           : hotelForm.amenities,
@@ -151,6 +229,7 @@ export default function HotelManagement() {
     }
   }
 
+  // 삭제 확인 후 DELETE 호출. 백엔드는 soft-delete(status='deleted')로 처리한다.
   const deleteHotel = async (hotel) => {
     if (!window.confirm(`Delete "${hotel.name_en}"? This action cannot be undone.`)) return
     try {
@@ -161,7 +240,7 @@ export default function HotelManagement() {
     }
   }
 
-  // Room CRUD
+  // ---------- 객실 타입 CRUD 핸들러 ----------
   const openAddRoom = () => {
     setEditingRoom(null)
     setRoomForm({ ...emptyRoom })
@@ -184,6 +263,7 @@ export default function HotelManagement() {
     setShowRoomModal(true)
   }
 
+  // 객실 타입 저장. 신규 생성 시에는 현재 확장된 호텔 id 를 hotel_id 로 붙인다.
   const saveRoom = async () => {
     setSaving(true)
     try {
@@ -216,13 +296,14 @@ export default function HotelManagement() {
     }
   }
 
-  // Inventory modal
+  // 재고 모달 열기 — 대상 객실 타입을 inventoryRoom 에 저장하고 표시.
+  // 모달 내부는 BulkInventoryManager 에 위임한다.
   const openInventoryModal = (room) => {
     setInventoryRoom(room)
     setShowInventoryModal(true)
   }
 
-  // Promotions modal
+  // 프로모션 모달 열기 — 대상 호텔 id 를 저장하고, PromotionManager 를 임베드.
   const openPromotionsModal = (hotelId) => {
     setPromotionsHotelId(hotelId)
     setShowPromotionsModal(true)
@@ -522,6 +603,24 @@ export default function HotelManagement() {
               placeholder="0"
             />
           </div>
+        </div>
+        {/* Restricted 토글 — access code 구매 게이트 플래그.
+            체크하면 이 호텔은 목록에서 🔒 배지가 달리고, BookingPage 에서
+            access_code 입력을 강제한다. 발급은 /access-codes 페이지에서. */}
+        <div className="form-group">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={hotelForm.is_restricted === 1}
+              onChange={(e) => setHotelForm({ ...hotelForm, is_restricted: e.target.checked ? 1 : 0 })}
+              style={{ width: 18, height: 18, cursor: 'pointer' }}
+            />
+            <span>{'\u{1F512}'} Restricted (access code required to book)</span>
+          </label>
+          <small style={{ color: '#64748b', marginLeft: 26 }}>
+            When enabled, only users with a matching access code can book this hotel.
+            Issue codes on the "Access Codes" page.
+          </small>
         </div>
         <div className="form-group">
           <label>Images</label>
