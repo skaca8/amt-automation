@@ -415,10 +415,21 @@ export default function AccessCodeManagement() {
       />
 
       {/* --- 발급 Modal --- */}
-      {modalOpen && (
-        <Modal title="Issue new access code" onClose={closeModal}>
-          {/* 서버가 방금 코드를 돌려줬으면 발급 결과 박스, 아니면 폼을 보여 준다. */}
-          {createdCode ? (
+      {/*
+        Modal 컴포넌트 계약: isOpen prop 으로 표시 여부를 제어한다.
+        조건부 렌더링({modalOpen && <Modal />})만으로는 동작하지 않는다 —
+        Modal 내부 첫 줄이 `if (!isOpen) return null` 이라 isOpen 이
+        falsy 면 빈 화면이 된다. 다른 admin 페이지(HotelManagement 등)와
+        동일하게 isOpen 을 명시적으로 전달.
+      */}
+      <Modal
+        isOpen={modalOpen}
+        onClose={closeModal}
+        title="Issue new access code"
+        size="md"
+      >
+        {/* 서버가 방금 코드를 돌려줬으면 발급 결과 박스, 아니면 폼을 보여 준다. */}
+        {createdCode ? (
             <div>
               <p style={{ marginBottom: 12, color: '#16a34a', fontWeight: 600 }}>
                 Access code issued successfully.
@@ -577,8 +588,7 @@ export default function AccessCodeManagement() {
               </div>
             </form>
           )}
-        </Modal>
-      )}
+      </Modal>
     </div>
   )
 }
