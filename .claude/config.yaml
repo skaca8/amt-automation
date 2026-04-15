@@ -1,0 +1,86 @@
+version: 1
+project:
+  name: amt-automation
+  pipeline: amt-automation-pipeline
+
+default_skill: dev_agent
+language: ko
+
+context:
+  include:
+    - ./backend/src
+    - ./frontend/src
+    - ./admin/src
+    - ./backend/package.json
+    - ./frontend/package.json
+    - ./admin/package.json
+    - ./.claude/CLAUDE.md
+    - ./.claude/config.yaml
+    - ./.claude/pipeline.yaml
+    - ./.claude/triggers.yaml
+    - ./.claude/settings.json
+    - ./.claude/skills/SKILL.md
+    - ./.claude/skills/claude_init.skill.yaml
+    - ./.claude/skills/dev_agent.skill.yaml
+    - ./.claude/skills/test_agent.skill.yaml
+    - ./.claude/skills/quality_agent.skill.yaml
+    - ./.claude/skills/security_agent.skill.yaml
+  exclude:
+    - ./node_modules
+    - ./backend/data
+    - ./backend/uploads
+    - ./.git
+    - ./dist
+    - ./build
+    - ./.claude/logs
+
+skills:
+  - name: dev_agent
+    path: skills/dev_agent.skill.yaml
+    triggers:
+      - "@triggers.develop"
+      - "Express"
+      - "컨벤션"
+      - "구현"
+      - "CLAUDE.md 기준"
+
+  - name: test_agent
+    path: skills/test_agent.skill.yaml
+    triggers:
+      - "@triggers.test"
+      - "Jest"
+      - "커버리지"
+
+  - name: quality_agent
+    path: skills/quality_agent.skill.yaml
+    triggers:
+      - "@triggers.review"
+      - "ESLint"
+      - "품질 검증"
+
+  - name: security_agent
+    path: skills/security_agent.skill.yaml
+    triggers:
+      - "@triggers.security"
+      - "인증"
+      - "인가"
+
+# 파이프라인 실행은 .claude/hooks/pipeline_trigger.sh (UserPromptSubmit) +
+# settings.json 네이티브 훅으로 자동화됨
+workflow:
+  pipeline_path: .claude/pipeline.yaml
+  mode: sequential
+  stop_on_failure: true
+  notifications:
+    success: "amt-automation pipeline success."
+    failure: "amt-automation pipeline failure."
+
+logging:
+  level: info
+  output: .claude/logs/claude.log
+  format: "[%(asctime)s] [%(levelname)s] %(message)s"
+
+feedback:
+  ask_before_edit: true
+  show_diff_on_change: true
+  require_confirmation_for_file_write: true

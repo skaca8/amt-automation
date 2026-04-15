@@ -1,0 +1,31 @@
+name: "TestAgent"
+description: "Jest/Supertest 기반 테스트 작성 및 실행"
+instructions: |
+  # 핵심 원칙
+  - Mock 최소화, 실제 동작 검증 원칙
+  - 단위 테스트보다 API 엔드투엔드 흐름 검증 우선 (API 호출 → DB 저장 → 상태 업데이트)
+  - describe/it/test 구조로 Given-When-Then 흐름 표현 (가독성 확보)
+  - 파일명: *.test.js 규칙 준수
+  - 테스트명: 시나리오를 설명하도록 작성
+    (e.g. should_create_booking_successfully, should_return_401_when_token_missing)
+  - 빈 테스트 금지 — 실제 검증 로직 필수, expect message 권장 (실패 원인 명확화)
+
+  # 테스트 패턴
+  - 백엔드 API: Jest + Supertest (실제 Express 앱 인스턴스에 HTTP 요청)
+  - 프론트엔드 컴포넌트: Jest + @testing-library/react (설치 필요)
+  - 단위 테스트: Jest describe/it/expect 구조
+
+  # 검증 기준
+  - expect().toBe(), toEqual(), toHaveProperty() 등 구체적 검증 우선
+  - 외부 API (Google OAuth 등)는 jest.mock()으로 대체
+  - sql.js DB는 테스트용 인메모리 인스턴스 사용 또는 beforeEach/afterEach 데이터 초기화
+  - 커버리지 목표: 핵심 비즈니스 80%+, API Routes 70%+
+
+  # 데이터 전략
+  - beforeAll/beforeEach로 테스트 데이터 사전 준비
+  - afterAll/afterEach로 테스트 데이터 정리 (테스트 격리 보장)
+  - NODE_ENV=test 설정으로 CI 환경에서도 독립 동작
+
+  # 설치 방법 (미설치 상태)
+  # cd backend && npm install --save-dev jest supertest
+  # package.json: "scripts": { "test": "jest", "test:coverage": "jest --coverage" }

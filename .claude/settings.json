@@ -1,0 +1,47 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/pipeline_trigger.sh",
+            "statusMessage": "파이프라인 트리거 감지 중..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/compile_check.sh",
+            "timeout": 60,
+            "statusMessage": "JS 문법 검증 중..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); CMD=$(echo \"$INPUT\" | jq -r '.tool_input.command // \"\"' 2>/dev/null); if echo \"$CMD\" | grep -qE 'npm.*(test|jest|vitest)'; then echo \"[testing] 테스트 실행 감지\"; elif echo \"$CMD\" | grep -qE 'git.*(push|commit)'; then echo \"[quality] 커밋/푸시 감지 → quality_agent 점검 권장\"; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[amt-automation] pipeline complete.\""
+          }
+        ]
+      }
+    ]
+  }
+}
