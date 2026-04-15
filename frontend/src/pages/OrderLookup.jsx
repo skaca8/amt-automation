@@ -1,3 +1,22 @@
+// ============================================================================
+// OrderLookup — 비회원 예약 조회 (/order-lookup)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 예약 번호 / 이메일 / 전화번호 중 하나 이상으로 /bookings/lookup 을
+//     호출해 일치하는 예약을 리스트로 보여 준다.
+//   - 결과 카드를 클릭하면 /booking/confirmation/:id 로 이동하는데, 이때
+//     반드시 guest_email 을 쿼리에 실어 ownership 체크를 통과시킨다.
+//
+// 렌더 위치: /order-lookup. lazy-loaded.
+//
+// 주의:
+//   - 백엔드는 쿼리 파라미터로 snake_case `booking_number` 를 요구한다.
+//     이전 camelCase 로 넘기던 버전은 필터가 조용히 누락되던 버그가 있었다
+//     (e504ce7 정합화).
+//   - 비회원 흐름이므로 localStorage 토큰 없이 호출 가능. 민감정보는 서버가
+//     email/phone 정확 일치 시에만 응답한다고 가정.
+// ============================================================================
+
 import React, { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -157,18 +176,24 @@ const styles = {
   },
 }
 
+/**
+ * 비회원 예약 조회 페이지.
+ * 부작용: 폼 제출 시 /bookings/lookup GET 1회. navigate 는 결과 카드 클릭 시.
+ */
 export default function OrderLookup() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [bookingNumber, setBookingNumber] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
+  // null = 아직 검색 안 한 상태, [] = 검색했지만 없음, [...] = 결과 있음.
   const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
   const handleSearch = async (e) => {
     e.preventDefault()
+    // 세 필드 모두 비어 있으면 호출 자체를 스킵(백엔드가 전체 dump 로 응답하지 않게).
     if (!bookingNumber && !email && !phone) return
 
     setLoading(true)
@@ -176,16 +201,18 @@ export default function OrderLookup() {
     setResults(null)
 
     try {
+      // 백엔드 /bookings/lookup 은 snake_case `booking_number` 를 기대한다.
+      // 예전 camelCase 파라미터명은 필터가 조용히 무시되던 버그가 있었다.
       const params = new URLSearchParams()
-      if (bookingNumber) params.set('bookingNumber', bookingNumber)
+      if (bookingNumber) params.set('booking_number', bookingNumber)
       if (email) params.set('email', email)
       if (phone) params.set('phone', phone)
 
       const data = await get(`/bookings/lookup?${params.toString()}`)
-      const bookings = data.bookings || data.data || (Array.isArray(data) ? data : data.booking ? [data.booking] : [data])
+      const bookings = data.bookings || []
       setResults(bookings)
     } catch (err) {
-      setError(err.message || 'Lookup failed')
+      setError(err.message || t('common.error'))
     } finally {
       setLoading(false)
     }
@@ -282,29 +309,36 @@ export default function OrderLookup() {
           <div style={styles.resultsList}>
             {results.length > 0 ? (
               results.map(booking => {
-                const bid = booking._id || booking.id
+                const bid = booking.id
+                // 비회원 조회 결과에서 상세로 넘어갈 때는 guest_email 을 URL 에
+                // 실어 줘야 한다. GET /bookings/:id 가 비로그인 요청에 대해
+                // guest_email 쿼리를 소유 증명으로 쓰기 때문이다.
+                const emailForDetail = email || booking.guest_email || ''
+                const detailHref = emailForDetail
+                  ? `/booking/confirmation/${bid}?email=${encodeURIComponent(emailForDetail)}`
+                  : `/booking/confirmation/${bid}`
                 return (
                   <div
                     key={bid}
                     style={styles.resultCard}
-                    onClick={() => navigate(`/my-bookings/${bid}`)}
+                    onClick={() => navigate(detailHref)}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.background = 'var(--bg)' }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'transparent' }}
                   >
                     <div style={styles.resultLeft}>
                       <div style={styles.resultId}>
-                        #{booking.bookingNumber || booking.confirmationNumber || bid?.slice(-8)}
+                        {booking.booking_number || `#${bid}`}
                       </div>
                       <div style={styles.resultName}>
-                        {booking.productName || booking.product?.name || 'Booking'}
+                        {booking.product_type || 'Booking'}
                       </div>
                       <div style={styles.resultDate}>
-                        {booking.createdAt ? new Date(booking.createdAt).toLocaleDateString() : ''}
+                        {booking.created_at ? new Date(booking.created_at).toLocaleDateString() : ''}
                       </div>
                     </div>
                     <div style={styles.resultRight}>
                       <div style={styles.resultPrice}>
-                        {t('common.currency')} {(booking.totalPrice || booking.total || 0).toLocaleString()}
+                        {t('common.currency')} {Number(booking.total_price || 0).toLocaleString()}
                       </div>
                       <span className={`badge ${getStatusBadge(booking.status)}`}>
                         {t(`statuses.${booking.status || 'pending'}`)}

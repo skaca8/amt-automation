@@ -1,6 +1,32 @@
+// ============================================================================
+// Admin — 프로모션 관리 임베드 컴포넌트 PromotionManager
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) 상품 상세 페이지(호텔/티켓/패키지) 안에 끼워 넣는 프로모션 CRUD UI.
+//      필요 시 productType/productId 로 필터링해 "이 상품에 걸린 프로모션만"
+//      보여 줄 수 있고, 아무 필터도 없이 전체 조회도 가능하다.
+//   2) 프로모션 생성/수정 폼(금액·정률, 적용 기간, 블랙아웃 기간 등) 을
+//      포함하며, 블랙아웃은 배열로 여러 구간을 추가/삭제할 수 있다.
+//   3) 생성/수정/삭제 모두 /api/admin/promotions 엔드포인트를 호출한다.
+//
+// Props:
+//   - productType : (선택) 'hotel' | 'ticket' | 'package'. 전달되면 목록을
+//                   해당 타입으로 필터링하고, 신규 폼의 기본값으로 채운다.
+//   - productId   : (선택) 특정 상품 id. 있으면 상품 전용 프로모션만 조회.
+//
+// 백엔드 스키마 주의:
+//   - blackout_dates 는 DB 에 JSON 문자열로 저장돼 있을 수도, 이미 배열로
+//     직렬화돼 내려올 수도 있다. 로드/저장 양쪽에서 방어 파싱을 한다.
+//   - discount_value 는 정수/소수 모두 허용. UI 에서는 문자열로 다루고
+//     저장 직전에 Number() 로 변환한다.
+//   - id 는 프로젝트 일부 구간에서 _id (Mongo 스타일) 로 내려올 때가 있어
+//     promo._id || promo.id 패턴을 사용한다.
+// ============================================================================
+
 import React, { useState, useEffect, useCallback } from 'react'
 import { get, post, put, del } from '../utils/api'
 
+// 새 프로모션 폼의 초기값 템플릿. openAdd 시 spread 해서 form 에 복사한다.
 const emptyPromotion = {
   name: '',
   discount_type: 'percentage',
@@ -13,6 +39,7 @@ const emptyPromotion = {
   blackout_dates: [],
 }
 
+// 블랙아웃 기간 한 건의 초기값. reason 은 선택 필드라 빈 문자열로 시작.
 const emptyBlackout = { start_date: '', end_date: '', reason: '' }
 
 const styles = {
@@ -220,12 +247,36 @@ const styles = {
   },
 }
 
+// 테이블 셀 표시용 포맷터. percentage 면 '%', fixed 면 원화 기호 + 천 단위.
 function formatDiscount(type, value) {
   if (type === 'percentage') return `${value}%`
   return `\u20a9${Number(value).toLocaleString()}`
 }
 
+/**
+ * PromotionManager — 임베드형 프로모션 CRUD.
+ *
+ * Props: productType / productId (둘 다 선택). 필터가 있으면 상품 전용 목록,
+ * 없으면 전체 프로모션 목록을 조회한다.
+ *
+ * 반환 UI:
+ *   - 상단 헤더: 타이틀 + "+ Add Promotion" 버튼
+ *   - 폼(showForm=true 일 때만): 이름/상태/할인 타입/값/적용 상품 범위/기간/
+ *     블랙아웃 리스트/저장-취소 버튼
+ *   - 표: 현재 등록된 프로모션 목록과 Edit/Delete 액션
+ *
+ * 부작용:
+ *   - GET/POST/PUT/DELETE /admin/promotions
+ *   - 삭제 시 window.confirm 으로 확인.
+ *   - 실패 시 alert() 으로 에러 노출.
+ */
 export default function PromotionManager({ productType, productId }) {
+  // promotions : 서버에서 받아온 프로모션 목록
+  // loading    : 첫 로딩 + reload 중 skeleton 플래그
+  // showForm   : 폼 영역의 확장 여부
+  // editing    : 편집 모드일 때 원본 프로모션 객체. null 이면 신규 추가 모드.
+  // form       : 현재 편집 중인 필드 값들 (controlled)
+  // saving     : 저장 중 버튼 disable 플래그
   const [promotions, setPromotions] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -233,6 +284,10 @@ export default function PromotionManager({ productType, productId }) {
   const [form, setForm] = useState({ ...emptyPromotion })
   const [saving, setSaving] = useState(false)
 
+  // ----------------------------------------------------------------------
+  // 목록 조회. 쿼리 파라미터는 productType/productId 가 있을 때만 추가한다.
+  // 응답은 promotions / data / 루트 배열 세 가지 중 하나를 허용.
+  // ----------------------------------------------------------------------
   const loadPromotions = useCallback(async () => {
     setLoading(true)
     try {
@@ -255,6 +310,8 @@ export default function PromotionManager({ productType, productId }) {
     loadPromotions()
   }, [loadPromotions])
 
+  // 신규 추가 폼 열기. 부모에서 내려온 productType/productId 가 있으면
+  // 바로 그 값으로 채워 줘 "현재 상품 한정" 프로모션을 만들기 쉽게 한다.
   const openAdd = () => {
     setEditing(null)
     setForm({
@@ -266,6 +323,13 @@ export default function PromotionManager({ productType, productId }) {
     setShowForm(true)
   }
 
+  // ----------------------------------------------------------------------
+  // 편집 폼 열기. 기존 프로모션 값을 form 에 복사한다.
+  //   - blackout_dates 가 문자열(JSON) 이면 파싱, 배열이면 그대로, 그 외에는 빈 배열.
+  //   - start_date/end_date 는 ISO 문자열일 수 있어 앞 10글자만 잘라
+  //     <input type="date"> 가 받는 YYYY-MM-DD 로 맞춘다.
+  //   - discount_value 는 discount_value / value 두 필드명을 순차 fallback.
+  // ----------------------------------------------------------------------
   const openEdit = (promo) => {
     setEditing(promo)
     let blackouts = []
@@ -296,6 +360,8 @@ export default function PromotionManager({ productType, productId }) {
     setForm({ ...emptyPromotion })
   }
 
+  // 블랙아웃 목록 헬퍼 — 배열 상태를 불변으로 갱신한다.
+  // 새 항목 추가: 기본값 템플릿을 push.
   const addBlackoutEntry = () => {
     setForm({
       ...form,
@@ -316,6 +382,11 @@ export default function PromotionManager({ productType, productId }) {
     })
   }
 
+  // ----------------------------------------------------------------------
+  // 저장 핸들러. editing 이 있으면 PUT, 없으면 POST.
+  // 백엔드가 blackout_dates 를 DB 에 JSON 문자열로 저장하므로, 프런트에서
+  // 미리 JSON.stringify 해서 보낸다. 빈 배열도 "[]" 로 보내야 기존 값을 지운다.
+  // ----------------------------------------------------------------------
   const savePromotion = async () => {
     if (!form.name) {
       alert('Please enter a promotion name.')
@@ -333,6 +404,7 @@ export default function PromotionManager({ productType, productId }) {
         blackout_dates: JSON.stringify(form.blackout_dates || []),
       }
       if (editing) {
+        // id 필드가 _id / id 로 뒤섞여 있을 수 있어 둘 중 존재하는 것을 사용.
         await put(`/admin/promotions/${editing._id || editing.id}`, payload)
       } else {
         await post('/admin/promotions', payload)
@@ -358,6 +430,8 @@ export default function PromotionManager({ productType, productId }) {
     }
   }
 
+  // 테이블 셀에 "3 period(s)" 식으로 간략 표시하기 위한 집계.
+  // 로드 시의 blackout_dates 파싱 로직과 동일.
   const formatBlackoutSummary = (promo) => {
     let blackouts = []
     if (promo.blackout_dates) {

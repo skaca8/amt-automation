@@ -1,3 +1,23 @@
+// ============================================================================
+// SearchBar — 홈 히어로 검색 위젯
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 호텔 / 티켓 / 패키지 세 탭을 전환하며 각 상품 유형에 맞는 필드를 보여준다.
+//   - 호텔 탭: 체크인·체크아웃 날짜 범위 + 인원 select.
+//   - 티켓 탭: 카테고리 select + 단일 날짜.
+//   - 패키지 탭: 단일 날짜만.
+//   - 제출하면 각 리스트 페이지(/hotels, /tickets, /packages)로 쿼리 파라미터와
+//     함께 navigate 한다.
+//
+// 렌더 위치: Home 페이지의 히어로 영역에 overlap 배치.
+//
+// 주의:
+//   - 날짜는 DateRangePicker / SingleDatePicker 에서 이미 'YYYY-MM-DD' 문자열로
+//     관리된다. 여기서는 그대로 URLSearchParams 에 넣을 뿐이다.
+//   - 호텔 탭은 체크아웃이 체크인보다 뒤에 있어야 한다는 가드가 있다.
+//     범위 피커에서도 막지만 수동 입력 흔적 대응으로 더블 체크.
+// ============================================================================
+
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -106,6 +126,12 @@ const styles = {
   },
 }
 
+/**
+ * 홈 히어로 검색바.
+ * - 탭 별로 세 개의 독립 state(hotelSearch / ticketSearch / packageSearch)를
+ *   가지고, 제출 시에만 해당 탭의 값을 URL 로 직렬화한다.
+ * - 부작용: navigate(/hotels?...) 등으로 리스트 페이지로 이동.
+ */
 export default function SearchBar() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -132,9 +158,12 @@ export default function SearchBar() {
     { key: 'packages', label: t('nav.packages') },
   ]
 
+  // 폼 제출 핸들러. activeTab 에 따라 URLSearchParams 를 조립해 navigate 한다.
   const handleSearch = (e) => {
     e.preventDefault()
     if (activeTab === 'hotels') {
+      // 체크아웃이 체크인보다 같거나 빠르면 거절. 문자열 비교가 ISO date 에
+      // 한해 사전순 = 시간순 이라 안전하게 동작한다.
       if (hotelSearch.checkIn && hotelSearch.checkOut && hotelSearch.checkOut <= hotelSearch.checkIn) {
         alert('Check-out date must be after check-in date.')
         return

@@ -1,7 +1,25 @@
-import React, { useState } from 'react'
+// ============================================================================
+// Register — 회원가입 페이지 (/register)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 이름/이메일/비밀번호(+확인)/전화/국적 폼을 받아 AuthContext.register
+//     를 호출한다. 성공 시 홈으로 이동.
+//   - 비밀번호 확인 불일치는 제출 전에 로컬에서 막는다.
+//   - Google 소셜 가입도 같이 제공한다. Google 플로우는 "가입 vs 로그인" 이
+//     동일하므로 loginWithGoogle 을 그대로 재사용한다(백엔드가 최초 진입 시
+//     사용자 행을 upsert 해 주는 구조).
+//
+// 렌더 위치: /register. lazy-loaded.
+//
+// 주의:
+//   - GoogleSignInButton 콜백은 반드시 useCallback. Login.jsx 와 동일 이유.
+// ============================================================================
+
+import React, { useState, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
+import GoogleSignInButton from '../components/GoogleSignInButton'
 
 const styles = {
   page: {
@@ -91,12 +109,33 @@ const styles = {
     fontSize: '0.85rem',
     color: 'var(--text-muted)',
   },
+  divider: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    margin: '24px 0',
+  },
+  dividerLine: {
+    flex: 1,
+    height: '1px',
+    background: 'var(--border)',
+  },
+  dividerText: {
+    fontSize: '0.75rem',
+    fontWeight: 600,
+    color: 'var(--text-muted)',
+    textTransform: 'uppercase',
+  },
 }
 
+/**
+ * 회원가입 페이지.
+ * 부작용: register() 성공 시 navigate('/'), Google 플로우도 동일.
+ */
 export default function Register() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { register } = useAuth()
+  const { register, loginWithGoogle } = useAuth()
   const [form, setForm] = useState({
     name: '',
     email: '',
@@ -107,6 +146,7 @@ export default function Register() {
   })
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
 
   const handleInput = (field) => (e) => {
     setForm(f => ({ ...f, [field]: e.target.value }))
@@ -132,11 +172,31 @@ export default function Register() {
       })
       navigate('/')
     } catch (err) {
-      setError(err.message || 'Registration failed')
+      setError(err.message || t('common.error'))
     } finally {
       setLoading(false)
     }
   }
+
+  // Register 에서의 Google 플로우는 Login 과 동일하다. 최초 방문에서 백엔드가
+  // 사용자 행을 upsert 하므로 별도 register-with-google 엔드포인트가 필요 없다.
+  // UX 일관성을 위해 loginWithGoogle 을 그대로 재사용한다.
+  const handleGoogleCredential = useCallback(async (credential) => {
+    setError(null)
+    setGoogleLoading(true)
+    try {
+      await loginWithGoogle(credential)
+      navigate('/')
+    } catch (err) {
+      setError(err.message || t('common.error'))
+    } finally {
+      setGoogleLoading(false)
+    }
+  }, [loginWithGoogle, navigate, t])
+
+  const handleGoogleError = useCallback((err) => {
+    setError((err && err.message) || t('common.error'))
+  }, [t])
 
   const inputProps = {
     onFocus: e => { e.target.style.borderColor = 'var(--primary)'; e.target.style.boxShadow = '0 0 0 3px rgba(26,115,232,0.1)' },
@@ -245,6 +305,20 @@ export default function Register() {
             {loading ? t('common.loading') : t('auth.registerBtn')}
           </button>
         </form>
+
+        {/* 구글 가입. Login 과 동일한 컴포넌트+핸들러를 쓴다. 이유는 위의
+            handleGoogleCredential 주석 참고(백엔드가 한 번의 호출로 upsert). */}
+        <div style={styles.divider}>
+          <span style={styles.dividerLine} />
+          <span style={styles.dividerText}>{t('auth.orDivider')}</span>
+          <span style={styles.dividerLine} />
+        </div>
+
+        <GoogleSignInButton
+          onCredential={handleGoogleCredential}
+          onError={handleGoogleError}
+          disabled={googleLoading || loading}
+        />
 
         <div style={styles.footer}>
           {t('auth.hasAccount')}{' '}

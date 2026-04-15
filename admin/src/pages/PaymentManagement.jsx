@@ -1,3 +1,22 @@
+// ============================================================================
+// Admin — 결제 관리 페이지 PaymentManagement
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) /admin/payments 엔드포인트로 결제 이력을 조회(페이지네이션 + 필터).
+//   2) 행 클릭 시 Modal 로 결제 상세 정보를 보여 준다(게이트웨이 응답 포함).
+//   3) 상태(Paid/Unpaid/Refunded/Failed/Pending) 와 결제 수단(Credit Card,
+//      Alipay, WeChat Pay, Bank Transfer, PayPal) 필터, 기간 필터 제공.
+//
+// 렌더링 위치: /payments 라우트.
+//
+// 주의:
+//   - 날짜 필터 파라미터는 반드시 from_date / to_date 여야 한다.
+//     과거에 start_date / end_date 로 보냈을 때 서버가 조용히 무시해
+//     필터가 "작동하는 것처럼" 보였던 이슈가 있었다(e504ce7 에서 수정).
+//   - 환불/취소 버튼은 이 페이지에 없다. 실제 환불 액션은 BookingDetail 에서
+//     수행하고, 여기서는 결제 상태의 "보기 전용" 뷰만 제공한다.
+// ============================================================================
+
 import React, { useState, useEffect, useCallback } from 'react'
 import { get } from '../utils/api'
 import DataTable from '../components/DataTable'
@@ -5,7 +24,15 @@ import Pagination from '../components/Pagination'
 import StatusBadge from '../components/StatusBadge'
 import Modal from '../components/Modal'
 
+/**
+ * PaymentManagement — 결제 목록 + 필터 + 상세 모달.
+ *
+ * 부작용: GET /admin/payments, 상세 모달 open/close.
+ */
 export default function PaymentManagement() {
+  // payments       : 현재 페이지의 결제 행
+  // filters        : 상태/결제수단/기간 필터 값
+  // selectedPayment: 상세 모달에 띄울 결제
   const [payments, setPayments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -30,8 +57,11 @@ export default function PaymentManagement() {
       params.set('limit', 20)
       if (filters.status) params.set('status', filters.status)
       if (filters.method) params.set('method', filters.method)
-      if (filters.startDate) params.set('start_date', filters.startDate)
-      if (filters.endDate) params.set('end_date', filters.endDate)
+      // 백엔드 routes/admin/payments.js 는 `from_date` / `to_date` 쿼리
+      // 파라미터를 받는다. 예전 코드에서 start_date/end_date 를 사용했을 때는
+      // 서버가 조용히 무시해서 필터가 안 먹히는 버그가 있었다(e504ce7 수정).
+      if (filters.startDate) params.set('from_date', filters.startDate)
+      if (filters.endDate) params.set('to_date', filters.endDate)
 
       const res = await get(`/admin/payments?${params.toString()}`)
       setPayments(res.payments || res.data || [])
@@ -48,11 +78,13 @@ export default function PaymentManagement() {
     loadPayments()
   }, [loadPayments])
 
+  // 필터 변경: 1페이지로 리셋. useEffect → loadPayments 순으로 재조회.
   const handleFilterChange = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
     setPage(1)
   }
 
+  // 행 클릭 → 상세 모달 오픈. 모달 close 시 selectedPayment 도 초기화한다.
   const handleRowClick = (payment) => {
     setSelectedPayment(payment)
     setShowDetail(true)

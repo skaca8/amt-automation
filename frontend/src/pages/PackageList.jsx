@@ -1,3 +1,13 @@
+// ============================================================================
+// PackageList — 패키지 목록 페이지 (/packages)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 마운트 시 /packages 를 한 번 호출해 받아온 목록을 카드 그리드로 보여 준다.
+//   - 로컬 검색어 입력으로 name/description 부분일치 필터링.
+//
+// 렌더 위치: /packages 라우트. lazy-loaded.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { get } from '../utils/api'
@@ -41,6 +51,10 @@ const styles = {
   },
 }
 
+/**
+ * 패키지 목록 페이지.
+ * 부작용: 마운트 시 /packages GET 1회.
+ */
 export default function PackageList() {
   const { t } = useTranslation()
   const [packages, setPackages] = useState([])

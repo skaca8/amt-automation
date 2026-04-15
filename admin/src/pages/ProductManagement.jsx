@@ -1,3 +1,20 @@
+// ============================================================================
+// Admin — 상품 관리 엔트리 ProductManagement
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   1) "상품" 카테고리(Hotels / Tickets / Packages) 세 가지 중 어디로 들어갈지
+//      고르는 랜딩 카드 그리드 페이지이다.
+//   2) 각 카드에는 해당 카테고리의 총 개수 / 활성 수 / (호텔의 경우) 총 객실 수
+//      를 요약으로 보여 준다.
+//   3) 카드 클릭 시 useNavigate 로 해당 상세 관리 페이지로 이동한다.
+//
+// 렌더링 위치: /products 라우트. 사이드바 "Products → Overview" 링크.
+//
+// 주의:
+//   - /admin/products/stats 엔드포인트가 아직 구현 전일 수 있어 실패 시
+//     조용히 빈 값으로 둔다(카드는 '...' 로 표시 후 0 으로 전환).
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { get } from '../utils/api'
@@ -77,8 +94,14 @@ const styles = {
   },
 }
 
+/**
+ * ProductManagement — 상품 카테고리 랜딩 카드.
+ *
+ * 부작용: GET /admin/products/stats, navigate() 이동.
+ */
 export default function ProductManagement() {
   const navigate = useNavigate()
+  // stats : 카드에 띄울 요약 숫자. loading 중엔 '...' 표시.
   const [stats, setStats] = useState({ hotels: 0, tickets: 0, packages: 0 })
   const [loading, setLoading] = useState(true)
 
@@ -86,6 +109,7 @@ export default function ProductManagement() {
     loadStats()
   }, [])
 
+  // 여러 이름의 응답 키를 허용한다(프로젝트 초기/중기/현재 버전이 섞여 있어).
   const loadStats = async () => {
     setLoading(true)
     try {

@@ -1,7 +1,35 @@
+// ============================================================================
+// BookingConfirmation — 예약 완료 페이지 (/booking/confirmation/:bookingId)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 방금 생성된 예약 1건을 /bookings/:id 로 다시 조회해 예약 번호, 상품,
+//     날짜, 수량, 총액, 상태, 바우처 코드를 카드 형태로 보여 준다.
+//   - 비로그인 예약도 완료 화면으로 넘어오기 때문에, BookingPage 가 URL 쿼리
+//     로 넘겨 준 guest_email 을 그대로 서버로 전달해 ownership 검증을 통과시킨다.
+//
+// 렌더 위치: /booking/confirmation/:bookingId. lazy-loaded.
+//
+// 주의:
+//   - 백엔드 응답은 { booking, voucher, payment, product, room_type } 이며
+//     booking 의 모든 컬럼명은 snake_case(sql.js row 직결).
+//   - 응답에서 guest_email 소지자 확인이 실패하면 404/403 을 돌려주는데,
+//     이 페이지는 그 경우 단순 에러 메시지만 표시한다.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { get } from '../utils/api'
+
+/**
+ * 백엔드 상품 객체에서 현재 언어에 맞는 필드를 골라 읽는다.
+ * _cn 번역이 비어 있으면 _en 으로 fallback. (BookingPage 와 동일한 정책.)
+ */
+function pickLocalized(obj, field, lang) {
+  if (!obj) return ''
+  const key = `${field}_${lang === 'cn' ? 'cn' : 'en'}`
+  return obj[key] || obj[`${field}_en`] || obj[field] || ''
+}
 
 const styles = {
   page: {
@@ -147,11 +175,23 @@ const styles = {
   },
 }
 
+/**
+ * 예약 완료 페이지.
+ *
+ * 내부 state:
+ *   - data    : { booking, voucher, payment, product, room_type } 응답 전체
+ *   - loading : 초기 조회 스피너
+ *   - error   : 조회 실패 메시지
+ *
+ * 부작용: 마운트 시 /bookings/:id (+ guest_email 쿼리) GET.
+ */
 export default function BookingConfirmation() {
   const { bookingId } = useParams()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { t } = useTranslation()
-  const [booking, setBooking] = useState(null)
+  const { t, i18n } = useTranslation()
+  const lang = i18n.language && i18n.language.startsWith('zh') ? 'cn' : (i18n.language || 'en')
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -159,8 +199,15 @@ export default function BookingConfirmation() {
     const fetchBooking = async () => {
       setLoading(true)
       try {
-        const data = await get(`/bookings/${bookingId}`)
-        setBooking(data.booking || data)
+        // 백엔드 /bookings/:id 는 로그인된 소유자이거나 guest_email 쿼리가
+        // 일치해야 응답을 돌려 준다. BookingPage 에서 결제 직후 URL 로
+        // email 을 넘겨 주므로 비회원 예약도 이 페이지가 정상 동작한다.
+        const emailParam = searchParams.get('email')
+        const url = emailParam
+          ? `/bookings/${bookingId}?guest_email=${encodeURIComponent(emailParam)}`
+          : `/bookings/${bookingId}`
+        const res = await get(url)
+        setData(res || null)
       } catch (err) {
         setError(err.message)
       } finally {
@@ -168,7 +215,7 @@ export default function BookingConfirmation() {
       }
     }
     fetchBooking()
-  }, [bookingId])
+  }, [bookingId, searchParams])
 
   if (loading) {
     return <div style={styles.page}><div className="loading-container"><div className="spinner" /><span className="loading-text">{t('common.loading')}</span></div></div>
@@ -186,20 +233,31 @@ export default function BookingConfirmation() {
     )
   }
 
-  const bkn = booking?.bookingNumber || booking?.confirmationNumber || bookingId
-  const voucherCode = booking?.voucherCode || booking?.voucher?.code || ''
-  const productName = booking?.productName || booking?.product?.name || booking?.hotel?.name || booking?.ticket?.name || booking?.package?.name || ''
-  const totalPrice = booking?.totalPrice || booking?.total || 0
+  // 백엔드 응답 shape: { booking, voucher, payment, product, room_type }.
+  // booking 내부 모든 컬럼은 sqlite row 에서 직접 오기 때문에 snake_case 다.
+  const booking = data?.booking || null
+  const voucher = data?.voucher || booking?.voucher || null
+  const product = data?.product || null
+  const roomType = data?.room_type || null
+
+  // UI 에 보여줄 파생 값. 빈 응답이어도 안전하게 '-' 로 fallback 되도록 준비.
+  const bkn = booking?.booking_number || bookingId
+  const voucherCode = voucher?.code || ''
+  const productName = pickLocalized(product, 'name', lang)
+  const totalPrice = Number(booking?.total_price || 0)
   const status = booking?.status || 'confirmed'
   const bookingQuantity = booking?.quantity || 1
-  const bookingType = booking?.type || ''
+  const bookingType = booking?.product_type || ''
+  const checkIn = booking?.check_in || ''
+  const checkOut = booking?.check_out || ''
+  const visitDate = booking?.visit_date || ''
 
   return (
     <div style={styles.page}>
       <div style={styles.successCard}>
         <div style={styles.checkmark}>&#10003;</div>
         <h1 style={styles.successTitle}>{t('booking.success')}</h1>
-        <p style={styles.successSubtitle}>Your booking has been confirmed. A confirmation email will be sent shortly.</p>
+        <p style={styles.successSubtitle}>{t('booking.confirmationMessage')}</p>
 
         <div style={styles.bookingNumberBox}>
           <div style={styles.bookingNumberLabel}>{t('booking.bookingNumber')}</div>
@@ -210,7 +268,14 @@ export default function BookingConfirmation() {
           {productName && (
             <div style={styles.detailItem}>
               <div style={styles.detailLabel}>{t('booking.product')}</div>
-              <div style={styles.detailValue}>{productName}</div>
+              <div style={styles.detailValue}>
+                {productName}
+                {roomType && (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                    {pickLocalized(roomType, 'name', lang)}
+                  </div>
+                )}
+              </div>
             </div>
           )}
           <div style={styles.detailItem}>
@@ -219,21 +284,23 @@ export default function BookingConfirmation() {
               <span className={`badge badge-${status}`}>{t(`statuses.${status}`)}</span>
             </div>
           </div>
-          {(booking?.checkIn || booking?.visitDate || booking?.startDate) && (
+          {(checkIn || visitDate) && (
             <div style={styles.detailItem}>
               <div style={styles.detailLabel}>{t('booking.dates')}</div>
               <div style={styles.detailValue}>
-                {booking.checkIn && booking.checkOut
-                  ? `${new Date(booking.checkIn).toLocaleDateString()} - ${new Date(booking.checkOut).toLocaleDateString()}`
-                  : new Date(booking.visitDate || booking.startDate).toLocaleDateString()
+                {checkIn && checkOut
+                  ? `${new Date(checkIn).toLocaleDateString()} - ${new Date(checkOut).toLocaleDateString()}`
+                  : visitDate ? new Date(visitDate).toLocaleDateString() : '-'
                 }
               </div>
             </div>
           )}
           {bookingQuantity > 1 && (bookingType === 'ticket' || bookingType === 'package') && (
             <div style={styles.detailItem}>
-              <div style={styles.detailLabel}>Quantity</div>
-              <div style={styles.detailValue}>{bookingQuantity} {bookingQuantity === 1 ? 'person' : 'persons'}</div>
+              <div style={styles.detailLabel}>{t('booking.quantity')}</div>
+              <div style={styles.detailValue}>
+                {bookingQuantity} {bookingQuantity === 1 ? t('common.person') : t('common.persons')}
+              </div>
             </div>
           )}
           {totalPrice > 0 && (

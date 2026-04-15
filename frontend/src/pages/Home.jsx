@@ -1,3 +1,20 @@
+// ============================================================================
+// Home — 랜딩 페이지 (/)
+// ----------------------------------------------------------------------------
+// 이 파일이 하는 일:
+//   - 히어로 배너 + SearchBar 검색 위젯을 보여 준다.
+//   - /hotels, /tickets, /packages 세 개 API 를 병렬로 불러와 각각 featured
+//     호텔 3개, 인기 티켓 4개, 베스트 패키지 3개 그리드로 렌더한다.
+//   - 하단 "Why Choose" 섹션은 정적 4개 카드(아이콘+텍스트).
+//
+// 렌더 위치: App.jsx 의 / 라우트. lazy-loaded.
+//
+// 주의:
+//   - Promise.allSettled 로 묶어 한 쪽 API 가 실패해도 다른 섹션은 렌더한다.
+//   - 백엔드 응답 shape 이 { hotels } / { data } / raw array 세 가지로
+//     섞여 들어와 세 단계 fallback 으로 안전 추출한다.
+// ============================================================================
+
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -125,6 +142,11 @@ const styles = {
   },
 }
 
+/**
+ * 홈 페이지.
+ * - 세 종류 상품의 상위 N개를 한번에 보여주는 랜딩.
+ * - 부작용: 마운트 시 /hotels, /tickets, /packages 각 한 번씩 fetch.
+ */
 export default function Home() {
   const { t } = useTranslation()
   const [hotels, setHotels] = useState([])
@@ -132,6 +154,8 @@ export default function Home() {
   const [packages, setPackages] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // 마운트 시 한 번 세 API 를 병렬로 호출.
+  // allSettled 로 감싸 한쪽 API 가 실패해도 나머지 섹션은 계속 보여준다.
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true)
@@ -141,6 +165,8 @@ export default function Home() {
           get('/tickets'),
           get('/packages'),
         ])
+        // 응답 shape 은 { hotels: [...] } / { data: [...] } / [...] 중 하나.
+        // 세 가지를 모두 허용해 상위 N개만 잘라 쓴다.
         setHotels((hotelsRes.status === 'fulfilled' ? (hotelsRes.value.hotels || hotelsRes.value.data || hotelsRes.value || []) : []).slice(0, 3))
         setTickets((ticketsRes.status === 'fulfilled' ? (ticketsRes.value.tickets || ticketsRes.value.data || ticketsRes.value || []) : []).slice(0, 4))
         setPackages((packagesRes.status === 'fulfilled' ? (packagesRes.value.packages || packagesRes.value.data || packagesRes.value || []) : []).slice(0, 3))

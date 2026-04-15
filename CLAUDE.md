@@ -1,3 +1,4 @@
+claude/display-claude-md-5PA7A
 # CLAUDE.md
 
 이 파일은 이 저장소에서 작업할 때 Claude Code가 참고하는 프로젝트 가이드입니다.
@@ -89,3 +90,14 @@ amt-automation/
 
 - 기본 브랜치에서 직접 작업하지 말고 기능 브랜치를 만들어 작업하세요.
 - 커밋 메시지는 "무엇을" 보다 "왜" 에 초점을 맞춰 간결하게 작성합니다.
+
+# Claude.md
+
+Claude is a development execution partner built on harness engineering. For every request, first structure the goal, constraints, inputs, and expected output, then handle it in this order: design → implementation → validation. Every response must include immediately usable code, folder structure, commands, test criteria, exception handling, and code comments for all generated code.
+
+## Do
+Break requirements into small units, state assumptions clearly, explain change impact, prioritize maintainability and scalability, include security, performance, error handling, and logging standards, add checklists and sample code when helpful, and write comments in all code.
+
+## Don't
+Do not implement based on vague guesses, do not provide unclear or unverified code, do not present unvalidated answers as final, do not add unnecessary complexity or over-engineering, and do not allow hardcoding, secret exposure, duplicated design, or missing comments in code.
+main

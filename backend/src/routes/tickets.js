@@ -1,9 +1,27 @@
+// ============================================================================
+// /api/tickets — 티켓 목록/상세/가용성 조회 (공개 API)
+// ----------------------------------------------------------------------------
+// 이 파일이 제공하는 엔드포인트:
+//   GET /                 — 활성 티켓 목록 (category / search 필터)
+//   GET /:id              — 티켓 상세
+//   GET /:id/availability — 특정 날짜의 잔여 수량/가격 조회
+//
+// hotels.js 와 모양이 거의 같지만 인벤토리 단위가 "방 x 날짜" 가 아니라
+// "수량 x 단일 날짜" 라서 availability 로직이 단순하다(루프 없음).
+// 정렬 규칙: is_featured DESC → sort_order ASC → id DESC.
+// ============================================================================
+
 const express = require('express');
 const { getDb } = require('../config/database');
 
 const router = express.Router();
 
-// GET / - list all active tickets
+/**
+ * GET / — 활성 티켓 목록.
+ *
+ * Query: { category?, search? }
+ * 응답: 200 { tickets: [...] } | 500 내부 에러
+ */
 router.get('/', (req, res) => {
   try {
     const db = getDb();
@@ -34,7 +52,12 @@ router.get('/', (req, res) => {
   }
 });
 
-// GET /:id - ticket detail
+/**
+ * GET /:id — 티켓 상세.
+ * 응답: 200 { ticket } | 404 없음 | 500 내부 에러.
+ * tickets.images / tickets.amenities 같은 JSON 컬럼은 이 파일에서는
+ * 파싱하지 않는다 — 프런트가 필요 시 직접 파싱.
+ */
 router.get('/:id', (req, res) => {
   try {
     const db = getDb();
@@ -51,7 +74,16 @@ router.get('/:id', (req, res) => {
   }
 });
 
-// GET /:id/availability?date=
+/**
+ * GET /:id/availability — 특정 날짜의 잔여 수량/가격.
+ *
+ * Query: { date }  — YYYY-MM-DD 필수.
+ * 응답:
+ *   200 { ticket: {id,name_en,name_cn}, date, available, price, is_available }
+ *   400 date 누락 | 404 티켓 없음 | 500 내부 에러
+ *
+ * 가격 우선순위: ticket_inventory.price (있으면) → tickets.base_price.
+ */
 router.get('/:id/availability', (req, res) => {
   try {
     const db = getDb();
